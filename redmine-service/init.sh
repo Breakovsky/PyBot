@@ -9,6 +9,7 @@ chown -R redmine:redmine /usr/src/redmine/log
 chown -R redmine:redmine /usr/src/redmine/public/plugin_assets
 chown -R redmine:redmine /usr/src/redmine/tmp
 chown -R redmine:redmine /usr/src/redmine/db
+chown -R redmine:redmine /usr/src/redmine/plugins
 chown -R redmine:redmine /var/log/redmine
 chown -R redmine:redmine /var/log/supervisor
 

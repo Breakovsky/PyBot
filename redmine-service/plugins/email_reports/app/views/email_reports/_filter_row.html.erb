@@ -1,0 +1,22 @@
+<tr class="filter-row">
+  <td>
+    <%= select_tag "email_report[query_filters][#{index}][field]",
+        options_for_select(available_filters.keys, field),
+        { include_blank: true, class: 'filter-field', data: { index: index } } %>
+  </td>
+  <td>
+    <%= select_tag "email_report[query_filters][#{index}][operator]",
+        options_for_select(Query.operators.keys, filter['operator'] || '='),
+        { class: 'filter-operator' } %>
+  </td>
+  <td>
+    <%= text_field_tag "email_report[query_filters][#{index}][values][]",
+        filter['values']&.first,
+        { class: 'filter-values', placeholder: 'значение' } %>
+  </td>
+  <td>
+    <%= link_to '×', '#', 
+        class: 'icon icon-del', 
+        onclick: 'removeFilter(this); return false;' %>
+  </td>
+</tr>

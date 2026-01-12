@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset='UTF-8'>
+  <title>Отчет Redmine</title>
+  <style>
+    body {
+      font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+      line-height: 1.6;
+      color: #343a40; /* Darker grey for text */
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 25px;
+      background-color: #f0f2f5; /* Light grey background */
+    }
+    .header {
+      background: #ffffff; /* White header */
+      color: #343a40; /* Dark text for header */
+      padding: 40px;
+      border-radius: 12px;
+      margin-bottom: 35px;
+      text-align: center;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+      border-top: 8px solid #007bff; /* Primary blue accent */
+    }
+    .header h1 {
+      margin: 0;
+      font-size: 36px;
+      font-weight: 700;
+      color: #212529; /* Even darker for main title */
+    }
+    .period {
+      font-size: 20px;
+      color: #6c757d; /* Muted grey for period */
+      margin-top: 15px;
+    }
+    .section {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 30px;
+      margin-bottom: 25px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+      border-left: 6px solid #6c757d; /* Muted grey border */
+    }
+    .section h2 {
+      color: #212529;
+      margin-top: 0;
+      margin-bottom: 25px;
+      font-size: 26px;
+      border-bottom: 2px solid #e9ecef;
+      padding-bottom: 15px;
+      font-weight: 600;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    th {
+      background: #007bff; /* Primary blue for table headers */
+      color: white;
+      padding: 15px 18px;
+      text-align: left;
+      font-weight: 600;
+      border: none;
+    }
+    td {
+      padding: 14px 18px;
+      border-bottom: 1px solid #dee2e6; /* Light grey border */
+      background-color: #ffffff;
+    }
+    tr:nth-child(even) td {
+      background-color: #f8f9fa; /* Slightly off-white for even rows */
+    }
+    tr:hover td {
+      background-color: #e2f2ff; /* Light blue on hover */
+    }
+    .total-row td {
+      background-color: #e0f2f7; /* Light cyan for total */
+      font-weight: bold;
+      border-top: 2px solid #007bff;
+    }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 25px;
+      margin-bottom: 35px;
+    }
+    .metric-card {
+      background: #ffffff;
+      padding: 25px;
+      border-radius: 12px;
+      text-align: center;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.05);
+      border-top: 6px solid #6c757d; /* Default muted border */
+    }
+    /* Individual metric card border colors */
+    .metric-card.total-closed { border-top-color: #28a745; } /* Green */
+    .metric-card.active-users { border-top-color: #007bff; } /* Blue */
+
+    .metric-value {
+      font-size: 40px;
+      font-weight: 700;
+      color: #212529; /* Darker for values */
+      margin: 15px 0 10px;
+    }
+    .metric-label {
+      color: #6c757d;
+      font-size: 15px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .status-open { color: #dc3545; font-weight: bold; } /* Red */
+    .status-in-progress { color: #ffc107; font-weight: bold; } /* Yellow/Orange */
+    .status-closed { color: #28a745; font-weight: bold; } /* Green */
+    .user-avatar {
+      display: inline-flex; /* Use flex for perfect centering */
+      align-items: center;
+      justify-content: center;
+      width: 40px; /* Slightly larger */
+      height: 40px;
+      background: #007bff; /* Primary blue */
+      color: white;
+      border-radius: 50%;
+      font-weight: bold;
+      font-size: 16px;
+      margin-right: 10px;
+      vertical-align: middle;
+      flex-shrink: 0; /* Prevent shrinking in flex container */
+    }
+    .user-section {
+      margin-bottom: 22px;
+      border: 1px solid #e9ecef;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .user-summary {
+      padding: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .no-activity {
+      background-color: #fff3cd; /* Light warning yellow */
+      color: #856404;
+    }
+    .has-activity {
+      background-color: #d4edda; /* Light success green */
+      color: #155724;
+    }
+    .user-stats {
+      padding: 8px 15px;
+      background: white;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      border: 1px solid #ced4da;
+    }
+    .user-details-content {
+      padding: 20px;
+      background-color: #f8f9fa;
+      border-top: 1px solid #e9ecef;
+    }
+    .section-title {
+      color: #212529;
+      margin-top: 35px;
+      margin-bottom: 20px;
+      font-size: 22px;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #e9ecef;
+      font-weight: 600;
+    }
+    .user-row td {
+        background-color: #e9f0f9 !important; /* Lighter blue for user rows in tables */
+        font-weight: 600;
+        border-top: 2px solid #cce5ff; /* Light blue border */
+    }
+    .user-row .user-avatar {
+        background: #0056b3; /* Darker blue for avatars in user rows */
+    }
+    .footer {
+      text-align: center;
+      margin-top: 50px;
+      color: #6c757d;
+      font-size: 14px;
+      border-top: 1px solid #e9ecef;
+      padding-top: 25px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div class='header'>
+    <h1>Отчет активности Redmine</h1>
+    <div class='period'>
+      Период: <b><%= @data[:start_date] %> - <%= @data[:end_date] %></b>
+    </div>
+  </div>
+
+  <!-- METRICS -->
+  <div class='metrics'>
+    <div class='metric-card total-closed'>
+      <div class='metric-label'>Задач завершено</div>
+      <div class='metric-value'><%= @data[:closed_issues_count] || 0 %></div>
+      <div>закрыты в период</div>
+    </div>
+    <% 
+      group_users_count = @data[:group_users] ? @data[:group_users].count : 0
+      active_users_count = @data[:closed_issues_by_user] ? @data[:closed_issues_by_user].count : 0
+    %>
+    <div class='metric-card active-users'>
+      <div class='metric-label'>Активных пользователей</div>
+      <div class='metric-value'><%= active_users_count %>/<%= group_users_count %></div>
+      <div>закрывали заявки</div>
+    </div>
+  </div>
+
+  <!-- USER ACTIVITY -->
+  <% if @data[:group_users] && @data[:group_users].any? %>
+    <div class='section'>
+      <h2>👥 Активность пользователей группы (Закрытые заявки)</h2>
+      
+      <% 
+        # Подготовка данных: разделение на активных и неактивных
+        closed_counts = @data[:closed_issues_by_user].map { |row| [row['user_id'].to_i, row['closed_count'].to_i] }.to_h
+        active_users = []
+        inactive_users = []
+        
+        @data[:group_users].each do |user|
+          user_id = user['id'].to_i
+          closed_count = closed_counts[user_id] || 0
+          if closed_count > 0
+            active_users << { 'user' => user, 'closed_count' => closed_count }
+          else
+            inactive_users << { 'user' => user, 'closed_count' => closed_count }
+          end
+        end
+        
+        # Сортировка активных по убыванию
+        active_users.sort_by! { |d| -d['closed_count'] }
+      %>
+
+      <!-- Inactive Users Section -->
+      <% if inactive_users.any? %>
+        <div class='section-title'>🙅‍♂️ Пользователи без закрытых заявок</div>
+        <% inactive_users.each do |d| %>
+          <% user = d['user'] %>
+          <% user_initials = "#{user['firstname'][0]}#{user['lastname'][0]}" %>
+          <div class='user-section'>
+            <div class='user-summary no-activity'>
+              <div>
+                <span class='user-avatar'><%= user_initials %></span>
+                <strong><%= "#{user['firstname']} #{user['lastname']}" %></strong>
+              </div>
+              <span class='user-stats'>Закрыто задач: <%= d['closed_count'] %></span>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
+
+      <!-- Active Users Section -->
+      <% if active_users.any? %>
+        <div class='section-title'>✅ Активные пользователи</div>
+        <% active_users.each do |d| %>
+          <% user = d['user'] %>
+          <% user_id = user['id'].to_i %>
+          <% user_initials = "#{user['firstname'][0]}#{user['lastname'][0]}" %>
+          
+          <div class='user-section'>
+            <div class='user-summary has-activity'>
+              <div>
+                <span class='user-avatar'><%= user_initials %></span>
+                <strong><%= "#{user['firstname']} #{user['lastname']}" %></strong>
+              </div>
+              <span class='user-stats'>Закрыто задач: <%= d['closed_count'] %></span>
+            </div>
+            
+            <%# Получаем детали из предзагруженных данных в модели %>
+            <% 
+               source_user_data = @data[:closed_issues_by_user].find { |u| u['user_id'].to_i == user_id }
+               details = source_user_data ? source_user_data['_closed_issues_details'] : []
+            %>
+            
+            <% if details && details.any? %>
+              <div class='user-details-content'>
+                <table>
+                  <tr><th>ID задачи</th><th>Тема</th><th>Дата создания</th><th>Дата закрытия</th><th>Статус</th></tr>
+                  <% details.each do |issue| %>
+                    <% 
+                      closed_date = issue['closed_date'] ? issue['closed_date'][0, 10] : (issue['closed_on'] ? issue['closed_on'][0, 10] : '—')
+                      status_class = issue['status_name'].downcase.include?('закр') || issue['status_name'].downcase.include?('closed') ? 'status-closed' : 'status-open'
+                      subject = issue['subject']
+                      subject_short = subject.length > 80 ? "#{subject[0..77]}..." : subject
+                      issue_link = "#{Setting.protocol}://#{Setting.host_name}/issues/#{issue['issue_id']}"
+                    %>
+                    <tr>
+                      <td><a href='<%= issue_link %>' target='_blank' style='text-decoration:none; color:#007bff;'><strong>#<%= issue['issue_id'] %></strong></a></td>
+                      <td title='<%= subject %>'><%= subject_short %></td>
+                      <td><%= issue['created_on'][0, 10] %></td>
+                      <td><%= closed_date %></td>
+                      <td><span class='<%= status_class %>'><%= issue['status_name'] %></span></td>
+                    </tr>
+                  <% end %>
+                </table>
+              </div>
+            <% end %>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+  <% end %>
+
+  <!-- ASSIGNED OPEN ISSUES -->
+  <% if @data[:assigned_open_issues] && @data[:assigned_open_issues].any? %>
+    <div class='section'>
+      <h2>👤 Открытые заявки (с исполнителем из группы)</h2>
+      <table>
+        <tr><th>ID</th><th>Тема</th><th>Дата создания</th><th>Статус</th><th>Автор</th></tr>
+        <% @data[:assigned_open_issues].group_by { |i| i['assigned_to_id'].to_i }.each do |assignee_id, issues| %>
+          <% assignee = issues.first %>
+          <% user_initials = "#{assignee['assignee_firstname'][0]}#{assignee['assignee_lastname'][0]}" %>
+          <tr class='user-row'>
+            <td colspan='5'>
+              <span class='user-avatar'><%= user_initials %></span>
+              <strong>Исполнитель: <%= "#{assignee['assignee_firstname']} #{assignee['assignee_lastname']}" %></strong>
+            </td>
+          </tr>
+          <% issues.each do |issue| %>
+            <% 
+              status_class = case issue['status_name'].downcase
+              when /в работе|in progress/i then 'status-in-progress'
+              else 'status-open'
+              end
+              subject = issue['subject']
+              subject_short = subject.length > 80 ? "#{subject[0..77]}..." : subject
+              issue_link = "#{Setting.protocol}://#{Setting.host_name}/issues/#{issue['id']}"
+            %>
+            <tr>
+              <td><a href='<%= issue_link %>' target='_blank' style='text-decoration:none; color:#007bff;'><strong>#<%= issue['id'] %></strong></a></td>
+              <td title='<%= subject %>'><%= subject_short %></td>
+              <td><%= issue['created_on'][0, 10] %></td>
+              <td><span class='<%= status_class %>'><%= issue['status_name'] %></span></td>
+              <td><%= "#{issue['author_firstname']} #{issue['author_lastname']}" %></td>
+            </tr>
+          <% end %>
+        <% end %>
+      </table>
+    </div>
+  <% elsif @data[:assigned_open_issues] %>
+    <div class='section'>
+      <h2>👤 Открытые заявки (с исполнителем из группы)</h2>
+      <p>Нет открытых заявок, назначенных пользователям группы.</p>
+    </div>
+  <% end %>
+
+  <!-- UNASSIGNED OPEN ISSUES -->
+  <% if @data[:unassigned_open_issues] && @data[:unassigned_open_issues].any? %>
+    <div class='section'>
+      <h2>❓ Открытые заявки без исполнителя</h2>
+      <table>
+        <tr><th>ID</th><th>Тема</th><th>Дата создания</th><th>Статус</th><th>Автор</th></tr>
+        <% @data[:unassigned_open_issues].each do |issue| %>
+          <% 
+            status_class = case issue['status_name'].downcase
+            when /в работе|in progress/i then 'status-in-progress'
+            else 'status-open'
+            end
+            subject = issue['subject']
+            subject_short = subject.length > 80 ? "#{subject[0..77]}..." : subject
+            issue_link = "#{Setting.protocol}://#{Setting.host_name}/issues/#{issue['id']}"
+          %>
+          <tr>
+            <td><a href='<%= issue_link %>' target='_blank' style='text-decoration:none; color:#007bff;'><strong>#<%= issue['id'] %></strong></a></td>
+            <td title='<%= subject %>'><%= subject_short %></td>
+            <td><%= issue['created_on'][0, 10] %></td>
+            <td><span class='<%= status_class %>'><%= issue['status_name'] %></span></td>
+            <td><%= "#{issue['author_firstname']} #{issue['author_lastname']}" %></td>
+          </tr>
+        <% end %>
+      </table>
+    </div>
+  <% elsif @data[:unassigned_open_issues] %>
+    <div class='section'>
+      <h2>❓ Открытые заявки без исполнителя</h2>
+      <p>Нет открытых заявок без исполнителя.</p>
+    </div>
+  <% end %>
+
+  <!-- FOOTER -->
+  <div class='footer'>
+    <p>Отчет сгенерирован автоматически • <%= Date.today %> • Группа отслеживания: #<%= @report.source_group&.id %> / Группа получателей: #<%= @report.recipient_group&.id %></p>
+  </div>
+
+</body>
+</html>

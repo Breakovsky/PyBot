@@ -1,0 +1,8 @@
+<!-- plugins/email_reports/app/views/hooks/email_reports/_project_link.html.erb -->
+<% if User.current.allowed_to?(:manage_email_reports, @project) %>
+  <div class="email-reports-sidebar">
+    <%= link_to l(:label_email_reports), 
+        { controller: 'email_reports', action: 'index', project_id: @project },
+        class: 'icon icon-email' %>
+  </div>
+<% end %>

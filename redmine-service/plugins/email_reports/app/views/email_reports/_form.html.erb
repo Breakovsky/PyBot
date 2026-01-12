@@ -1,0 +1,340 @@
+<%= form_for @email_report, html: { class: 'form' } do |f| %>
+  <%= error_messages_for @email_report %>
+
+  <div class="splitcontent">
+    <!-- ЛЕВАЯ КОЛОНКА: Основные настройки -->
+    <div class="splitcontentleft">
+      <fieldset class="box tabular">
+        <legend><%= l(:label_general) %></legend>
+        
+        <p>
+          <%= f.label :name, l(:field_name), class: 'required' %>
+          <%= f.text_field :name, required: true, style: 'width: 95%;' %>
+        </p>
+
+        <p>
+          <%= f.label :description, l(:field_description) %>
+          <%= f.text_area :description, rows: 3, style: 'width: 95%;' %>
+        </p>
+
+        <p>
+          <%= f.label :project_id, l(:field_project) %>
+          <%= f.select :project_id, 
+              options_from_collection_for_select(Project.active.order(:name), :id, :name, @email_report.project_id),
+              { include_blank: true }, { style: 'width: 95%;' } %>
+        </p>
+
+        <p>
+          <%= f.label :is_active, l(:field_is_active) %>
+          <%= f.check_box :is_active %>
+        </p>
+      </fieldset>
+
+      <fieldset class="box tabular">
+        <legend><%= l(:label_email_report_type) %></legend>
+        
+        <p>
+          <%= f.label :report_type, "Тип данных" %>
+          <%= f.select :report_type, 
+              options_for_select([
+                [l(:label_email_report_type_issues), 'issues'],
+                [l(:label_email_report_type_time_entries), 'time_entries']
+              ], @email_report.report_type), {}, { data: { toggle_report_type: true }, style: 'width: 95%;' } %>
+        </p>
+
+        <!-- Секция для задач -->
+        <div id="issues_specific_fields">
+          <p>
+            <%= f.label :source_group_id, "Источник (Группа)" %>
+            <%= f.select :source_group_id, 
+                options_from_collection_for_select(Group.sorted, :id, :lastname, @email_report.source_group_id),
+                { include_blank: "Все пользователи" },
+                { style: 'width: 95%;' } %>
+            <br><em class="info" style="margin-left: 180px;">Оставьте пустым для отчета по всем</em>
+          </p>
+          
+          <p>
+            <%= f.label :report_period_days, "За период (дней)" %>
+            <%= f.number_field :report_period_days, value: @email_report.report_period_days || 7, min: 1, max: 365, style: 'width: 60px;' %>
+          </p>
+
+          <p>
+            <%= f.label :group_by, l(:label_email_report_group_by) %>
+            <%= f.select :group_by, 
+                options_for_select([
+                  [l(:field_status), 'status'],
+                  [l(:field_priority), 'priority'],
+                  [l(:field_assigned_to), 'assigned_to']
+                ], @email_report.group_by),
+                { include_blank: true }, { style: 'width: 95%;' } %>
+          </p>
+        </div>
+      </fieldset>
+    </div>
+
+    <!-- ПРАВАЯ КОЛОНКА: Расписание -->
+    <div class="splitcontentright">
+      <fieldset class="box tabular">
+        <legend>Расписание отправки</legend>
+
+        <p>
+          <%= f.label :schedule_type, l(:label_email_report_schedule_type) %>
+          <%= f.select :schedule_type, 
+              options_for_select([
+                [l(:label_email_report_schedule_daily), 'daily'],
+                [l(:label_email_report_schedule_weekly), 'weekly'],
+                [l(:label_email_report_schedule_monthly), 'monthly'],
+                [l(:label_email_report_schedule_custom), 'custom']
+              ], @email_report.schedule_type), 
+              {}, 
+              onchange: "toggleScheduleFields(this.value);",
+              style: 'width: 95%;' %>
+        </p>
+
+        <!-- Выбор дней недели -->
+        <p id="weekly_days_container" style="display:none;">
+          <label>Дни недели</label>
+          <span style="display: block; margin-left: 0; padding-top: 5px;">
+            <% 
+              current_val = @email_report.schedule_cron.to_s
+              is_cron = current_val.include?('*') || current_val.include?(' ')
+              current_days = is_cron ? [] : current_val.split(',').map(&:to_i)
+              days_map = { 1 => 'Пн', 2 => 'Вт', 3 => 'Ср', 4 => 'Чт', 5 => 'Пт', 6 => 'Сб', 0 => 'Вс' }
+            %>
+            <% days_map.each do |idx, name| %>
+              <label style="display: inline-block; margin-right: 10px; margin-left: 0; width: auto; float: none;">
+                <%= check_box_tag "email_report[week_days][]", idx, current_days.include?(idx) %> <%= name %>
+              </label>
+            <% end %>
+          </span>
+        </p>
+
+        <!-- Cron -->
+        <p id="cron_field" style="display:none;">
+          <%= f.label :schedule_cron, "Cron выражение" %>
+          <%= f.text_field :schedule_cron, placeholder: '0 8 * * *', style: 'width: 95%;' %>
+          <br><em class="info" style="margin-left: 180px;">Формат: мин час день мес день_недели</em>
+        </p>
+
+        <!-- ВРЕМЯ ОТПРАВКИ (ДВА СЕЛЕКТА) -->
+        <p>
+          <label><%= l(:label_email_report_send_time) %></label>
+          <% 
+             # Получаем текущее время или ставим дефолт 08:00
+             time_val = @email_report.send_time || Time.parse("08:00")
+             selected_hour = time_val.strftime("%H")
+             selected_min = time_val.strftime("%M")
+             # Округлим минуты до ближайших 5, чтобы красиво встало в селект, если вдруг в базе 03 минуты
+             selected_min_i = selected_min.to_i
+             rounded_min = (selected_min_i / 5.0).round * 5
+             rounded_min = 0 if rounded_min == 60
+             selected_min_str = rounded_min.to_s.rjust(2, '0')
+          %>
+          
+          <%= select_tag "email_report[time_hour]", 
+              options_for_select((0..23).map { |h| [h.to_s.rjust(2, '0'), h.to_s.rjust(2, '0')] }, selected_hour),
+              id: "email_report_time_hour",
+              style: "width: auto; display: inline-block;" 
+          %>
+          :
+          <%= select_tag "email_report[time_min]", 
+              options_for_select((0..55).step(5).map { |m| [m.to_s.rjust(2, '0'), m.to_s.rjust(2, '0')] }, selected_min_str),
+              id: "email_report_time_min",
+              style: "width: auto; display: inline-block;" 
+          %>
+          <span style="color: #777; font-size: 0.9em; margin-left: 5px;">(MSK)</span>
+        </p>
+      </fieldset>
+    </div>
+  </div>
+
+  <!-- ПОЛУЧАТЕЛИ -->
+  <fieldset class="box">
+    <legend><%= l(:label_email_report_recipients) %></legend>
+    
+    <div style="background: #fcfcfc; padding: 10px; border: 1px solid #e4e4e4; margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+      <label style="font-weight: bold;">Добавить получателя:</label>
+      <%= text_field_tag 'recipient_search', '', id: 'recipient_search', placeholder: 'Начните вводить имя пользователя или группы...', style: 'width: 350px; padding: 4px;' %>
+      <%= button_tag 'Добавить', type: 'button', id: 'add_recipient_btn', class: 'icon icon-add', disabled: true %>
+    </div>
+
+    <div id="recipients_list">
+      <table class="list" style="width: 100%">
+        <thead>
+          <tr>
+            <th style="text-align: left; padding-left: 10px;">Имя / Группа</th>
+            <th style="width: 150px;">Тип</th>
+            <th style="width: 100px; text-align: center;">Удалить</th>
+          </tr>
+        </thead>
+        <tbody id="recipients_tbody">
+          <% @email_report.recipients.each_with_index do |recipient, index| %>
+            <% next if recipient.recipient_type == 'email' %>
+            <% 
+               principal = case recipient.recipient_type
+                           when 'user' then User.find_by(id: recipient.recipient_id)
+                           when 'group' then Group.find_by(id: recipient.recipient_id)
+                           end
+               next unless principal
+               name = principal.is_a?(User) ? principal.name : principal.lastname
+               type_label = recipient.recipient_type == 'user' ? 'User' : 'Group'
+               display_type = if recipient.recipient_type == 'user'
+                                groups = principal.groups.map(&:lastname).join(', ')
+                                "Пользователь #{groups.present? ? "(#{groups})" : ''}"
+                              else
+                                "Группа"
+                              end
+            %>
+            <tr class="recipient-row">
+              <td style="padding-left: 10px;">
+                <span class="<%= recipient.recipient_type == 'user' ? 'icon icon-user' : 'icon-group' %>">
+                  <%= name %>
+                </span>
+                <input type="hidden" name="recipients_data[<%= index %>][id]" value="<%= recipient.recipient_id %>">
+                <input type="hidden" name="recipients_data[<%= index %>][type]" value="<%= type_label %>">
+              </td>
+              <td><%= display_type %></td>
+              <td style="text-align: center;">
+                <a href="#" class="icon icon-del" onclick="removeRow(this); return false;"></a>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top: 20px; padding-top: 10px; border-top: 1px dashed #ccc;">
+      <p>
+        <label style="font-weight: bold; display: block; margin-bottom: 5px;">Внешние Email адреса (каждый с новой строки):</label>
+        <%= text_area_tag 'recipient_emails', 
+            @email_report.recipients.where(recipient_type: 'email').pluck(:email).join("\n"),
+            rows: 3, style: 'width: 100%; max-width: 600px; font-family: monospace;' %>
+      </p>
+    </div>
+  </fieldset>
+
+  <div style="margin-top: 15px;">
+    <%= f.submit l(:button_save) %>
+  </div>
+<% end %>
+
+<style>
+  .splitcontentleft fieldset, .splitcontentright fieldset {
+    min-height: 280px; 
+  }
+  fieldset.tabular p {
+    margin-bottom: 10px;
+  }
+</style>
+
+<script>
+function toggleScheduleFields(val) {
+  if (val === 'custom') {
+    $('#cron_field').show();
+  } else {
+    $('#cron_field').hide();
+  }
+  if (val === 'weekly') {
+    $('#weekly_days_container').show();
+  } else {
+    $('#weekly_days_container').hide();
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  // Инициализация расписания
+  const scheduleSelect = document.getElementById('email_report_schedule_type');
+  if (scheduleSelect) toggleScheduleFields(scheduleSelect.value);
+
+  // Переключение типа отчета
+  const reportTypeSelect = document.querySelector('[data-toggle-report-type]');
+  const issuesSpecificFields = document.getElementById('issues_specific_fields');
+  
+  function toggleFields() {
+    if (reportTypeSelect && issuesSpecificFields) {
+      issuesSpecificFields.style.display = reportTypeSelect.value == 'issues' ? 'block' : 'none';
+    }
+  }
+  if (reportTypeSelect) {
+    reportTypeSelect.addEventListener('change', toggleFields);
+    toggleFields(); 
+  }
+  
+  // Логика поиска
+  const searchInput = document.getElementById('recipient_search');
+  const addButton = document.getElementById('add_recipient_btn');
+  const tbody = document.getElementById('recipients_tbody');
+  let currentSelection = null;
+  let searchTimeout;
+
+  if (searchInput) {
+    searchInput.addEventListener('input', function() {
+      clearTimeout(searchTimeout);
+      const query = this.value.trim();
+      
+      if (query.length < 2) {
+        addButton.disabled = true;
+        currentSelection = null;
+        return;
+      }
+
+      searchTimeout = setTimeout(() => {
+        fetch('/admin/email_reports/available_principals?q=' + encodeURIComponent(query))
+          .then(response => response.json())
+          .then(data => {
+            if (data.length > 0) {
+              currentSelection = data[0];
+              searchInput.title = "Найдено: " + currentSelection.name;
+              addButton.disabled = false;
+              addButton.value = "Добавить: " + currentSelection.name;
+            } else {
+              addButton.disabled = true;
+              currentSelection = null;
+              addButton.value = "Добавить";
+            }
+          });
+      }, 300);
+    });
+  }
+
+  if (addButton) {
+    addButton.addEventListener('click', function() {
+      if (!currentSelection) return;
+      addRecipientRow(currentSelection);
+      searchInput.value = '';
+      addButton.disabled = true;
+      addButton.value = 'Добавить';
+      currentSelection = null;
+    });
+  }
+
+  function addRecipientRow(item) {
+    const timestamp = new Date().getTime();
+    const row = document.createElement('tr');
+    row.className = 'recipient-row';
+    
+    let displayType = item.type === 'User' ? `Пользователь ${item.extra || ''}` : 'Группа';
+    let iconClass = item.type === 'User' ? 'icon icon-user' : 'icon-group';
+
+    row.innerHTML = `
+      <td style="padding-left: 10px;">
+        <span class="${iconClass}">
+          <strong>${item.name}</strong>
+        </span>
+        <input type="hidden" name="recipients_data[${timestamp}][id]" value="${item.id}">
+        <input type="hidden" name="recipients_data[${timestamp}][type]" value="${item.type}">
+      </td>
+      <td>${displayType}</td>
+      <td style="text-align: center;">
+        <a href="#" class="icon icon-del" onclick="removeRow(this); return false;"></a>
+      </td>
+    `;
+    
+    tbody.appendChild(row);
+  }
+});
+
+window.removeRow = function(link) {
+  link.closest('tr').remove();
+}
+</script>

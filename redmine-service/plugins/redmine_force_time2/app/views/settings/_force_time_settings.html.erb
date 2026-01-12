@@ -1,13 +1,22 @@
 <p>
-  <label><b>Project IDs</b> (empty = all):</label><br>
+  <label><b>ID Проектов</b> (пусто = во всех проектах):</label><br>
   <%= text_field_tag 'settings[projects]', Setting.plugin_redmine_force_time2['projects'], size: 50, placeholder: '1, 12, 5' %>
+  <br><em>Укажите ID проектов через запятую. ID можно найти в URL проекта или в списке проектов.</em>
 </p>
+
+<hr>
+
 <p>
-  <label>Closing Status IDs:</label><br>
+  <label>ID Статусов закрытия:</label><br>
   <%= text_field_tag 'settings[statuses]', Setting.plugin_redmine_force_time2['statuses'], size: 30 %>
 </p>
+
 <p>
-  <label>Error Message (Time):</label><br>
+  <label>Ошибка (нет времени):</label><br>
   <%= text_field_tag 'settings[message_time]', Setting.plugin_redmine_force_time2['message_time'], size: 80 %>
 </p>
 
+<p>
+  <label>Ошибка (категория 'Прочее'):</label><br>
+  <%= text_field_tag 'settings[message_category]', Setting.plugin_redmine_force_time2['message_category'], size: 80 %>
+</p>

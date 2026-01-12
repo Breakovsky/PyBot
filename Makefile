@@ -186,6 +186,13 @@ redmine-migrate: ## Run Redmine migrations
 redmine-console: ## Open Redmine Rails console
 	docker-compose exec redmine bundle exec rails console
 
+redmine-plugins-sync: ## Copy plugins from source to storage directory
+	@echo "$(GREEN)Syncing plugins to storage...$(NC)"
+	@mkdir -p storage/redmine/plugins
+	@cp -r redmine-service/plugins/* storage/redmine/plugins/ 2>/dev/null || true
+	@echo "$(GREEN)✓ Plugins synced$(NC)"
+	@echo "$(YELLOW)Restart Redmine to load plugins: make restart$(NC)"
+
 # --- MONITORING ---
 watch: ## Watch all logs in real-time
 	watch -n 2 'docker-compose ps'

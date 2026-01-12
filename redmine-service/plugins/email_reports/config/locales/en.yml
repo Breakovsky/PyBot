@@ -1,0 +1,51 @@
+en:
+  label_email_reports: Email Reports
+  label_email_report_new: New email report
+  label_email_report_edit: Edit email report
+  label_email_report_schedule_type: Schedule
+  label_email_report_schedule_daily: Daily
+  label_email_report_schedule_weekly: Weekly
+  label_email_report_schedule_monthly: Monthly
+  label_email_report_schedule_custom: Custom (cron)
+  label_email_report_schedule_cron: Cron expression
+  text_email_report_cron_help: 'Format: minute hour day month weekday (e.g., 0 8 * * 1)'
+  label_email_report_send_time: Send time
+  label_email_report_type: Report type
+  label_email_report_type_issues: Issues
+  label_email_report_type_time_entries: Time entries
+  label_email_report_group_by: Group by
+  label_email_report_recipients: Recipients
+  label_email_report_add_recipient: Add recipient
+  label_email_report_last_sent: Last sent
+  label_email_report_filters: Filters
+  label_email_report_add_filter: Add filter
+  label_email_report_columns: Columns
+  label_email_report_add_column: Add column
+  label_email_reports_settings: Email Reports Settings
+  label_smtp_timeout: SMTP timeout
+  label_max_recipients: Max recipients
+  button_test: Test
+  notice_email_report_test_sent: Test email sent successfully
+  notice_email_report_test_failed: Test email failed
+  notice_email_report_activated: Report activated
+  notice_email_report_deactivated: Report deactivated
+  notice_email_report_created: Report created successfully
+  notice_email_report_updated: Report updated successfully
+  notice_email_report_deleted: Report deleted successfully
+  field_name: Name
+  field_description: Description
+  field_project: Project
+  field_author: Author
+  field_is_active: Active
+  field_status: Status
+  field_priority: Priority
+  field_assigned_to: Assigned to
+  field_category: Category
+  field_tracker: Tracker
+  label_actions: Actions
+  label_no_data: No data
+  button_edit: Edit
+  button_delete: Delete
+  button_save: Save
+  general_text_yes: "Yes"
+  general_text_no: "No"

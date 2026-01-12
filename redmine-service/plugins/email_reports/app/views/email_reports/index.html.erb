@@ -1,0 +1,119 @@
+<h2><%= l(:label_email_reports) %></h2>
+
+<div class="contextual">
+  <%= link_to l(:label_email_report_new), new_email_report_path, class: 'icon icon-add' %>
+</div>
+
+<% if @email_reports.any? %>
+  <table class="list">
+    <thead>
+      <tr>
+        <th><%= l(:field_name) %></th>
+        <th><%= l(:field_description) %></th>
+        <th><%= l(:label_email_report_schedule_type) %></th>
+        <th>Группа источника</th>
+        <th><%= l(:field_author) %></th>
+        <th><%= l(:field_is_active) %></th>
+        <th><%= l(:label_email_report_last_sent) %></th>
+        <th>Следующая отправка</th>
+        <th style="width: 10%;"><%= l(:label_actions) %></th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @email_reports.each do |report| %>
+        <tr>
+          <td><%= link_to report.name, edit_email_report_path(report) %></td>
+          <td style="color:#888;"><%= truncate(report.description.to_s, length: 40) %></td>
+          <td><%= l("label_email_report_schedule_#{report.schedule_type}") %></td>
+          <td><%= report.source_group ? report.source_group.lastname : '-' %></td>
+          <td><%= report.author.name %></td>
+          <td align="center">
+            <% if report.is_active %>
+              <span class="icon icon-checked" title="<%= l(:general_text_yes) %>"></span>
+            <% else %>
+              <span class="icon icon-locked" title="<%= l(:general_text_no) %>" style="opacity: 0.5;"></span>
+            <% end %>
+          </td>
+          
+          <!-- Последняя отправка -->
+          <td><%= report.last_sent_at ? format_time(report.last_sent_at) : '-' %></td>
+          
+                    <!-- ЛОГИКА РАСЧЕТА СЛЕДУЮЩЕЙ ДАТЫ -->
+          <td>
+            <% 
+               next_run_date = nil
+               if report.is_active && report.send_time
+                 # 1. Базовые переменные
+                 now = Time.now
+                 msk_zone = ActiveSupport::TimeZone.new('Europe/Moscow')
+                 now_msk = now.in_time_zone(msk_zone)
+                 
+                 target_hour = report.send_time.strftime('%H').to_i
+                 target_min = report.send_time.strftime('%M').to_i
+                 
+                 # Собираем время запуска "сегодня"
+                 candidate = now_msk.change(hour: target_hour, min: target_min, sec: 0)
+                 
+                 case report.schedule_type
+                 when 'daily'
+                   # Если время уже прошло сегодня, то завтра
+                   next_run_date = (candidate > now_msk) ? candidate : candidate + 1.day
+                   
+                 when 'weekly'
+                   # Дни недели из базы (1=Пн, ..., 6=Сб, 0=Вс)
+                   days = report.schedule_cron.to_s.split(',').map(&:to_i)
+                   days = [1] if days.empty? # Дефолт Пн
+                   
+                   # Ищем ближайший день начиная с сегодня (0..6 дней вперед)
+                   found_date = nil
+                   (0..7).each do |offset|
+                     check_date = candidate + offset.days
+                     # Проверка дня недели
+                     if days.include?(check_date.wday)
+                       # Если это сегодня, но время уже прошло - пропускаем
+                       if offset == 0 && check_date <= now_msk
+                         next
+                       end
+                       found_date = check_date
+                       break
+                     end
+                   end
+                   next_run_date = found_date
+                   
+                 when 'monthly'
+                   # 1-е число месяца
+                   this_month_run = candidate.change(day: 1)
+                   if this_month_run > now_msk
+                      next_run_date = this_month_run
+                   else
+                      next_run_date = this_month_run + 1.month
+                   end
+                 end
+               end
+            %>
+
+            <% if next_run_date %>
+              <!-- Формат: 27.11.2025 | Четверг в 08:00 -->
+              <strong><%= next_run_date.strftime("%d.%m.%Y") %></strong>
+              <br>
+              <span style="color: #666; font-size: 0.9em;">
+                <!-- day_name(wday) - хелпер Redmine для локализованного дня недели -->
+                <%= day_name(next_run_date.wday) %> в <%= next_run_date.strftime("%H:%M") %>
+              </span>
+            <% else %>
+              <span style="color: #999;">-</span>
+            <% end %>
+          </td>
+
+          <td class="buttons">
+            <%= link_to l(:button_test), test_email_report_path(report), method: :post, class: 'icon icon-test', title: "Отправить сейчас" %>
+            <%= link_to l(:button_edit), edit_email_report_path(report), class: 'icon icon-edit' %>
+            <%= delete_link email_report_path(report) %>
+          </td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+<% else %>
+  <p class="nodata"><%= l(:label_no_data) %></p>
+<% end %>

@@ -1,0 +1,51 @@
+ru:
+  label_email_reports: Email отчёты
+  label_email_report_new: Новый email отчёт
+  label_email_report_edit: Редактировать email отчёт
+  label_email_report_schedule_type: Расписание
+  label_email_report_schedule_daily: Ежедневно
+  label_email_report_schedule_weekly: Еженедельно
+  label_email_report_schedule_monthly: Ежемесячно
+  label_email_report_schedule_custom: Пользовательское (cron)
+  label_email_report_schedule_cron: Cron выражение
+  text_email_report_cron_help: 'Формат: минута час день месяц день_недели (например, 0 8 * * 1)'
+  label_email_report_send_time: Время отправки
+  label_email_report_type: Тип отчёта
+  label_email_report_type_issues: Задачи
+  label_email_report_type_time_entries: Трудозатраты
+  label_email_report_group_by: Группировать по
+  label_email_report_recipients: Получатели
+  label_email_report_add_recipient: Добавить получателя
+  label_email_report_last_sent: Последняя отправка
+  label_email_report_filters: Фильтры
+  label_email_report_add_filter: Добавить фильтр
+  label_email_report_columns: Колонки
+  label_email_report_add_column: Добавить колонку
+  label_email_reports_settings: Настройки Email отчётов
+  label_smtp_timeout: SMTP таймаут
+  label_max_recipients: Максимум получателей
+  button_test: Тест
+  notice_email_report_test_sent: Тестовое письмо успешно отправлено
+  notice_email_report_test_failed: Ошибка отправки тестового письма
+  notice_email_report_activated: Отчёт активирован
+  notice_email_report_deactivated: Отчёт деактивирован
+  notice_email_report_created: Отчёт успешно создан
+  notice_email_report_updated: Отчёт успешно обновлён
+  notice_email_report_deleted: Отчёт удалён
+  field_name: Название
+  field_description: Описание
+  field_project: Проект
+  field_author: Автор
+  field_is_active: Активен
+  field_status: Статус
+  field_priority: Приоритет
+  field_assigned_to: Назначена
+  field_category: Категория
+  field_tracker: Трекер
+  label_actions: Действия
+  label_no_data: Нет данных
+  button_edit: Редактировать
+  button_delete: Удалить
+  button_save: Сохранить
+  general_text_yes: "Да"
+  general_text_no: "Нет"
