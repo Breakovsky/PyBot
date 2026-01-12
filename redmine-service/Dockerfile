@@ -27,12 +27,12 @@ RUN git clone https://github.com/southbridgeio/redmine_recurring_tasks.git plugi
     cd plugins/redmine_recurring_tasks && \
     git checkout master 
 
-# 2. Spent Time Required (Skipped due to git auth issues, prefer redmine_force_time2)
+# 2. Spent Time Required (Skipped due to git auth issues, using custom redmine_issue_guard instead)
 # RUN git clone https://github.com/juggler/redmine_spent_time_required.git plugins/redmine_spent_time_required
 
 # Copy Custom Plugins (Using root context paths)
 COPY redmine-service/plugins/email_reports /usr/src/redmine/plugins/email_reports
-COPY redmine-service/plugins/redmine_force_time2 /usr/src/redmine/plugins/redmine_force_time2
+COPY redmine-service/plugins/redmine_issue_guard /usr/src/redmine/plugins/redmine_issue_guard
 
 # Install plugin dependencies
 RUN bundle config set --local without 'development test' && \

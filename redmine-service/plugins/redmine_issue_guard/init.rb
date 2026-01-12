@@ -1,10 +1,10 @@
 require 'redmine'
 
-Redmine::Plugin.register :redmine_force_time2 do
-  name 'Force Time BLOCKER'
+Redmine::Plugin.register :redmine_issue_guard do
+  name 'Issue Guard'
   author 'RodionovSA'
   version '2.1'
-  description 'Блокирует закрытие без времени (с фильтрацией проектов)'
+  description 'Валидация задач: блокирует закрытие без трудозатрат и с некорректной категорией (с фильтрацией по проектам)'
   
   settings default: {
     'statuses' => '5',
@@ -18,7 +18,7 @@ class Issue
   alias_method :original_save, :save unless method_defined?(:original_save)
   
   def save(*args)
-    settings = Setting.plugin_redmine_force_time2 || {}
+    settings = Setting.plugin_redmine_issue_guard || {}
     
     # 1. Фильтр по проектам
     project_ids = (settings['projects'] || '').split(',').map(&:strip).reject(&:empty?)
@@ -45,7 +45,7 @@ class Issue
       end
 
       if errors[:base].any?
-        Rails.logger.error "FORCE_TIME2: BLOCKED ##{id} (Project: #{project_id})"
+        Rails.logger.error "ISSUE_GUARD: BLOCKED ##{id} (Project: #{project_id})"
         return false
       end
     end
@@ -54,4 +54,4 @@ class Issue
   end
 end
 
-Rails.logger.info 'FORCE_TIME2 v5: ACTIVE!'
+Rails.logger.info 'ISSUE_GUARD v2.1: ACTIVE!'

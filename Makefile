@@ -189,9 +189,13 @@ redmine-console: ## Open Redmine Rails console
 redmine-plugins-sync: ## Copy plugins from source to storage directory
 	@echo "$(GREEN)Syncing plugins to storage...$(NC)"
 	@mkdir -p storage/redmine/plugins
-	@cp -r redmine-service/plugins/* storage/redmine/plugins/ 2>/dev/null || true
+	@rsync -av --delete redmine-service/plugins/ storage/redmine/plugins/ 2>/dev/null || cp -r redmine-service/plugins/* storage/redmine/plugins/ 2>/dev/null || true
 	@echo "$(GREEN)✓ Plugins synced$(NC)"
 	@echo "$(YELLOW)Restart Redmine to load plugins: make restart$(NC)"
+
+redmine-plugins-list: ## List all registered Redmine plugins
+	@echo "$(GREEN)Registered plugins:$(NC)"
+	@docker-compose exec -T redmine bundle exec rails runner "puts Redmine::Plugin.all.map { |p| \"  - #{p.id}: #{p.name} v#{p.version}\" }.join(\"\\n\")" 2>/dev/null || echo "$(RED)Failed to list plugins$(NC)"
 
 # --- MONITORING ---
 watch: ## Watch all logs in real-time
