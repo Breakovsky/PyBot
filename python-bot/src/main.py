@@ -3,105 +3,153 @@ import logging
 import os
 import json
 import redis.asyncio as redis
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message
+from sqlalchemy import select, update
 
-# Configure logging
+# Core imports
+from src.core.database import async_session, TelegramTopic, UserRole, TelegramUser
+from src.core.middlewares import RoleMiddleware
+
+# Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Environment variables
+# Config
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")  # Default to 'redis' for Docker
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
-# Initialize Redis with connection pool
-redis_client = redis.Redis(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
-    db=0,
-    decode_responses=True,
-    socket_connect_timeout=5,
-    socket_timeout=5,
-    retry_on_timeout=True
-)
-
-# Initialize Bot and Dispatcher
-if not BOT_TOKEN:
-    logger.error("BOT_TOKEN is not set!")
-    exit(1)
-
+# Initialize Bot
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# Redis
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+
+# Register Middleware
+dp.message.middleware(RoleMiddleware())
+
+# --- Topic Helper ---
+async def get_topic_id(session, topic_name):
+    result = await session.execute(select(TelegramTopic).where(TelegramTopic.name == topic_name))
+    topic = result.scalar_one_or_none()
+    return topic.thread_id if topic else None
+
+# --- Handlers ---
+
 @dp.message(Command("start"))
 async def cmd_start(message: Message):
-    """
-    Handle /start command.
-    """
-    await message.answer("NetAdmin Bot v2.0 (LTS) Online.\nUse /test_mail to simulate MDaemon user creation.")
+    async with async_session() as session:
+        # User is auto-created by middleware
+        await message.answer("NetAdmin v3.0 (RBAC Enabled). Access Level: Verified.")
 
-@dp.message(Command("test_mail"))
-async def cmd_test_mail(message: Message):
-    """
-    Test MDaemon integration.
-    Sends a 'CREATE_USER' task to the Java backend.
-    """
-    user_id = message.from_user.id
-    username = message.from_user.username or f"user_{user_id}"
-    
-    task_payload = {
-        "action": "CREATE_USER",
-        "user_id": user_id,
-        "username": username,
-        "payload": {
-            "email": f"{username}@example.com",
-            "domain": "example.com"
-        }
-    }
-    
-    try:
-        # Publish to Redis channel
-        await redis_client.publish("netadmin_tasks", json.dumps(task_payload))
-        logger.info(f"Published CREATE_USER task to Redis: {task_payload}")
-        await message.answer(f"Command sent to backend!\nCreating user: {username}@example.com")
-    except Exception as e:
-        logger.error(f"Failed to publish to Redis: {e}")
-        await message.answer("Error connecting to backend system.")
+@dp.message(Command("admin"), flags={"role": UserRole.SENIOR_ADMIN})
+async def cmd_admin(message: Message, user: TelegramUser):
+    """Restricted to Senior Admin+"""
+    await message.answer(f"🔧 Admin Console Active.\nWelcome, {user.username} ({user.role.value}).")
 
-async def check_redis_connection():
-    """Check Redis connection before starting bot"""
-    max_retries = 5
-    for i in range(max_retries):
-        try:
-            await redis_client.ping()
-            logger.info(f"✓ Redis connected at {REDIS_HOST}:{REDIS_PORT}")
-            return True
-        except Exception as e:
-            logger.warning(f"Redis connection attempt {i+1}/{max_retries} failed: {e}")
-            if i < max_retries - 1:
-                await asyncio.sleep(2)
-            else:
-                logger.error("Failed to connect to Redis after all retries")
-                return False
-    return False
+@dp.message(Command("set_topic"), flags={"role": UserRole.CTO})
+async def cmd_set_topic(message: Message):
+    """
+    Map current thread to a logical topic.
+    Usage: /set_topic tickets
+    """
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("Usage: /set_topic <name> (e.g., tickets, monitoring)")
+        return
+
+    topic_name = args[1]
+    thread_id = message.message_thread_id or 0 # 0 for general topic/private
+
+    async with async_session() as session:
+        stmt = select(TelegramTopic).where(TelegramTopic.name == topic_name)
+        result = await session.execute(stmt)
+        topic = result.scalar_one_or_none()
+
+        if topic:
+            topic.thread_id = thread_id
+            await message.answer(f"✅ Topic '{topic_name}' updated to Thread ID: {thread_id}")
+        else:
+            await message.answer(f"❌ Topic '{topic_name}' not found in DB schema.")
+        
+        await session.commit()
+
+@dp.message(F.text.regexp(r"^WS\d+")) # Simple Asset Pattern
+async def handle_asset_query(message: Message):
+    # Route logic: Check if we are in 'assets' topic
+    async with async_session() as session:
+        assets_tid = await get_topic_id(session, 'assets')
+        
+        # If configured, enforce topic
+        if assets_tid and message.message_thread_id != assets_tid:
+            # Optionally ignore or redirect
+            return 
+
+    await message.reply(f"🔍 Searching inventory for asset: {message.text}...")
+    # (Future Phase: Query Postgres Inventory)
+
+@dp.message(Command("cookie"))
+async def cmd_cookie(message: Message):
+    """Give a cookie to a user (Gamification)"""
+    if not message.reply_to_message:
+        await message.reply("Reply to a user to give them a cookie! 🍪")
+        return
+
+    recipient_id = message.reply_to_message.from_user.id
+    
+    async with async_session() as session:
+        # Find or create recipient
+        result = await session.execute(select(TelegramUser).where(TelegramUser.telegram_id == recipient_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            user = TelegramUser(telegram_id=recipient_id, username=message.reply_to_message.from_user.username)
+            session.add(user)
+        
+        user.karma_points += 1
+        await session.commit()
+        await message.answer(f"🍪 Cookie given! {user.username} now has {user.karma_points} karma.")
+
+# --- Background Worker (Redis Listener) ---
+async def redis_listener():
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe("bot_alerts", "netadmin_tasks")
+    
+    logger.info("🎧 Redis Listener Active")
+    
+    async for message in pubsub.listen():
+        if message['type'] != 'message':
+            continue
+            
+        channel = message['channel']
+        data = message['data']
+        
+        if channel == "bot_alerts":
+            # Format: "TOPIC_NAME|MESSAGE" or JSON
+            try:
+                topic_name, text = data.split("|", 1)
+                
+                async with async_session() as session:
+                    thread_id = await get_topic_id(session, topic_name)
+                    
+                    # Need Supergroup ID from Env
+                    chat_id = os.getenv("TELEGRAM_SUPERGROUP_ID")
+                    
+                    if chat_id:
+                        await bot.send_message(chat_id=chat_id, text=text, message_thread_id=thread_id)
+                    else:
+                        logger.warning("TELEGRAM_SUPERGROUP_ID not set")
+            except Exception as e:
+                logger.error(f"Alert Error: {e}")
 
 async def main():
-    logger.info("Starting NetAdmin Bot LTS...")
+    # Start Redis Listener
+    asyncio.create_task(redis_listener())
     
-    # Check Redis connection first
-    if not await check_redis_connection():
-        logger.error("Cannot start bot without Redis connection")
-        exit(1)
-    
-    try:
-        await dp.start_polling(bot)
-    except Exception as e:
-        logger.error(f"Bot execution failed: {e}")
-    finally:
-        await redis_client.close()
-        await bot.session.close()
+    # Start Bot
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())

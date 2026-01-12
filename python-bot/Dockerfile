@@ -15,7 +15,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src/ src/
 
-# Set Python to be unbuffered
+# Set Python to be unbuffered and add /app to path
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app
 
 CMD ["python", "src/main.py"]

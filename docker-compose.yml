@@ -14,6 +14,34 @@ services:
     networks:
       - bot_net
 
+  # --- Admin Control Plane (Phase 2) ---
+  admin-panel:
+    build: ./admin-panel
+    container_name: netadmin_control_plane
+    restart: always
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - POSTGRES_HOST=db
+      - REDIS_HOST=redis
+      - ADMIN_PASSWORD=admin # Change in prod!
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # Security Risk: Bind mounting docker socket
+      - ./backups:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - bot_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
   # --- Core Service ---
   redmine:
     build: 
@@ -62,6 +90,7 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
       - ./storage/postgresql-data:/var/lib/postgresql/data
+      - ./config/init_rbac.sql:/docker-entrypoint-initdb.d/init_rbac.sql:ro
     networks:
       - bot_net
     healthcheck:
@@ -112,8 +141,12 @@ services:
     environment:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - POSTGRES_HOST=db
+      - TELEGRAM_SUPERGROUP_ID=${TELEGRAM_SUPERGROUP_ID}
     depends_on:
       redis:
+        condition: service_healthy
+      db:
         condition: service_healthy
     networks:
       - bot_net

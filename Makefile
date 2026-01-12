@@ -64,6 +64,9 @@ logs-agent: ## Show Java agent logs
 logs-nginx: ## Show Nginx logs
 	docker-compose logs -f nginx
 
+logs-admin: ## Show Admin Panel logs
+	docker-compose logs -f admin-panel
+
 ps: ## Show running containers
 	docker-compose ps
 
@@ -78,6 +81,9 @@ shell-agent: ## Open shell in Java agent container
 
 shell-db: ## Open PostgreSQL shell
 	docker-compose exec db psql -U $$(grep POSTGRES_USER .env | cut -d '=' -f2) -d $$(grep POSTGRES_DB .env | cut -d '=' -f2)
+
+shell-admin: ## Open shell in Admin Panel container
+	docker-compose exec admin-panel /bin/bash
 
 # --- GIT ---
 commit: ## Git commit (usage: make commit MSG="your message")
