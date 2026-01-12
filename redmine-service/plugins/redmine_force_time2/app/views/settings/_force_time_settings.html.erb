@@ -1,0 +1,13 @@
+<p>
+  <label><b>Project IDs</b> (empty = all):</label><br>
+  <%= text_field_tag 'settings[projects]', Setting.plugin_redmine_force_time2['projects'], size: 50, placeholder: '1, 12, 5' %>
+</p>
+<p>
+  <label>Closing Status IDs:</label><br>
+  <%= text_field_tag 'settings[statuses]', Setting.plugin_redmine_force_time2['statuses'], size: 30 %>
+</p>
+<p>
+  <label>Error Message (Time):</label><br>
+  <%= text_field_tag 'settings[message_time]', Setting.plugin_redmine_force_time2['message_time'], size: 80 %>
+</p>
+

@@ -1,0 +1,10 @@
+production:
+  adapter: postgresql
+  database: <%= ENV['REDMINE_DB_DATABASE'] %>
+  host: <%= ENV['REDMINE_DB_POSTGRES'] %>
+  port: 5432
+  username: <%= ENV['REDMINE_DB_USERNAME'] %>
+  password: <%= ENV['REDMINE_DB_PASSWORD'] %>
+  encoding: utf8
+  pool: 5
+

@@ -13,11 +13,19 @@ logger = logging.getLogger(__name__)
 
 # Environment variables
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")  # Default to 'redis' for Docker
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
-# Initialize Redis
-redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
+# Initialize Redis with connection pool
+redis_client = redis.Redis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    db=0,
+    decode_responses=True,
+    socket_connect_timeout=5,
+    socket_timeout=5,
+    retry_on_timeout=True
+)
 
 # Initialize Bot and Dispatcher
 if not BOT_TOKEN:
@@ -62,13 +70,37 @@ async def cmd_test_mail(message: Message):
         logger.error(f"Failed to publish to Redis: {e}")
         await message.answer("Error connecting to backend system.")
 
+async def check_redis_connection():
+    """Check Redis connection before starting bot"""
+    max_retries = 5
+    for i in range(max_retries):
+        try:
+            await redis_client.ping()
+            logger.info(f"✓ Redis connected at {REDIS_HOST}:{REDIS_PORT}")
+            return True
+        except Exception as e:
+            logger.warning(f"Redis connection attempt {i+1}/{max_retries} failed: {e}")
+            if i < max_retries - 1:
+                await asyncio.sleep(2)
+            else:
+                logger.error("Failed to connect to Redis after all retries")
+                return False
+    return False
+
 async def main():
     logger.info("Starting NetAdmin Bot LTS...")
+    
+    # Check Redis connection first
+    if not await check_redis_connection():
+        logger.error("Cannot start bot without Redis connection")
+        exit(1)
+    
     try:
         await dp.start_polling(bot)
     except Exception as e:
         logger.error(f"Bot execution failed: {e}")
     finally:
+        await redis_client.close()
         await bot.session.close()
 
 if __name__ == "__main__":

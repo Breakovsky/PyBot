@@ -1,10 +1,27 @@
-__pycache__/
-*.py[cod]
-*$py.class
-venv/
+# Environment variables
 .env
-.idea/
-target/
-*.iml
-.DS_Store
 
+# Docker storage (databases, files)
+storage/postgresql-data/
+storage/redis-data/
+storage/redmine/files/
+storage/redmine/plugins/
+storage/redmine/themes/
+storage/shared/
+
+# Logs
+logs/
+*.log
+
+# Backups
+backups/
+
+# Mock data
+mock_mdaemon_app/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

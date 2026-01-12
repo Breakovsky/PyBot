@@ -1,9 +1,6 @@
 FROM redmine:6.0-alpine
 
 # Install system dependencies
-# We need build-base and ruby-dev for installing gems with native extensions if needed
-# Supervisor is needed for process management
-# Curl for healthchecks
 RUN apk add --no-cache \
     supervisor \
     curl \
@@ -13,25 +10,44 @@ RUN apk add --no-cache \
     libxml2-dev \
     libxslt-dev \
     postgresql-dev \
-    tzdata
+    tzdata \
+    git \
+    imagemagick
 
-# Install additional gems used in the old project
+# Install additional gems
 RUN gem install whenever -v '1.0.0' && \
     gem install chronic -v '0.10.2' && \
     gem install mail && \
     gem install pg
 
-# Copy configuration files
-COPY config/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-COPY config/email_receive.sh /usr/local/bin/email_receive
-COPY config/send_report.rb /usr/local/bin/send_report.rb
+# --- PLUGINS INSTALLATION ---
 
-# Make scripts executable
-RUN chmod +x /usr/local/bin/email_receive /usr/local/bin/send_report.rb
+# 1. Recurring Tasks (Standard)
+RUN git clone https://github.com/southbridgeio/redmine_recurring_tasks.git plugins/redmine_recurring_tasks && \
+    cd plugins/redmine_recurring_tasks && \
+    git checkout master 
+
+# 2. Spent Time Required (Skipped due to git auth issues, prefer redmine_force_time2)
+# RUN git clone https://github.com/juggler/redmine_spent_time_required.git plugins/redmine_spent_time_required
+
+# Copy Custom Plugins (Using root context paths)
+COPY redmine-service/plugins/email_reports /usr/src/redmine/plugins/email_reports
+COPY redmine-service/plugins/redmine_force_time2 /usr/src/redmine/plugins/redmine_force_time2
+
+# Install plugin dependencies
+RUN bundle config set --local without 'development test' && \
+    bundle install
+
+# Copy Supervisor config
+COPY redmine-service/config/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Copy Init script
+COPY redmine-service/init.sh /docker-entrypoint-custom.sh
+RUN chmod +x /docker-entrypoint-custom.sh
 
 # Create log directories
-RUN mkdir -p /var/log/supervisor /var/log/redmine
+RUN mkdir -p /var/log/supervisor /var/log/redmine && \
+    chmod -R 777 /var/log && \
+    chown -R redmine:redmine /usr/src/redmine
 
-# Start via Supervisor
-ENTRYPOINT ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
-
+ENTRYPOINT ["/docker-entrypoint-custom.sh"]

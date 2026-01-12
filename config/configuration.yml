@@ -1,0 +1,17 @@
+default:
+  email_delivery:
+    delivery_method: :smtp
+    smtp_settings:
+      address: "<%= ENV['SMTP_ADDRESS'] %>"
+      port: <%= ENV['SMTP_PORT'] %>
+      domain: "<%= ENV.fetch('SMTP_DOMAIN', 'localhost') %>"
+      authentication: "<%= ENV['SMTP_AUTH'] %>"
+      user_name: "<%= ENV['SMTP_USERNAME'] %>"
+      password: "<%= ENV['SMTP_PASSWORD'] %>"
+      enable_starttls_auto: <%= ENV.fetch('SMTP_STARTTLS', 'true') == 'true' %>
+      openssl_verify_mode: "none"
+
+  attachments_storage_path: /usr/src/redmine/files
+  
+  # Security
+  jsonp_enabled: false
