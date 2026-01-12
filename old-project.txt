@@ -1,0 +1,1802 @@
+################################################################################
+📄 FILE: ./config/backup.sh
+################################################################################
+#!/bin/bash
+
+while true; do
+  BACKUP_DIR="/tmp/redmine_backup"
+  DATE=$(date +%Y%m%d_%H%M%S)
+  REMOTE_PATH="/remote_backup" 
+
+  mkdir -p $BACKUP_DIR
+  echo "Created local backup directory $BACKUP_DIR"
+
+  pg_dump -h postgres -U postgres -d redmine > $BACKUP_DIR/redmine_db_$DATE.sql
+  if [ $? -ne 0 ]; then
+    echo "Database backup FAILED."
+    continue
+  fi
+
+  cp -r /usr/src/redmine/files $BACKUP_DIR/attachments
+
+  TAR_FILE="redmine_backup_$DATE.tar.gz"
+  tar -czf $TAR_FILE -C $BACKUP_DIR .
+  echo "Created archive $TAR_FILE"
+
+  cp $TAR_FILE $REMOTE_PATH/
+  TRANSFER_STATUS=$?
+
+  if [ $TRANSFER_STATUS -eq 0 ]; then
+    echo "Backup successfully transferred to $REMOTE_PATH/$TAR_FILE"
+  else
+    echo "Transfer FAILED."
+  fi
+
+  rm -rf $BACKUP_DIR $TAR_FILE
+
+  sleep 3600
+done
+
+
+################################################################################
+📄 FILE: ./config/database.yml
+################################################################################
+production:
+  adapter: postgresql
+  database: redmine
+  host: postgres
+  port: 5432
+  username: postgres
+  password: "PASSWORD"
+  encoding: utf8
+
+
+################################################################################
+📄 FILE: ./config/email_receive.sh
+################################################################################
+#!/bin/bash
+
+export PATH="/usr/local/bundle/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export RAILS_ENV=production
+export LANG=C.UTF-8
+
+cd /usr/src/redmine
+
+RAILS_ENV=production /usr/local/bin/bundle exec /usr/local/bin/rake redmine:email:receive_imap \
+    host=email.gpnof.ru \
+    port=993 \
+    ssl=true \
+    username=test_help@gpnof.ru \
+    password=xYk!4!!V-7 \
+    project=uh \
+    tracker=bug \
+    unknown_user=create \
+    no_permission_check=1
+
+EXIT_CODE=$?
+
+exit $EXIT_CODE
+
+
+################################################################################
+📄 FILE: ./config/send_report.rb
+################################################################################
+#!/usr/bin/env ruby
+
+require 'pg'
+require 'mail'
+require 'date'
+require 'json' 
+
+# --- КОНСТАНТЫ И КОНФИГУРАЦИЯ ---
+
+class Config
+  DB_PARAMS = {
+    host: 'postgres',
+    port: 5432,
+    dbname: 'redmine',
+    user: 'postgres',
+    password: 'PASSWORD'
+  }
+
+  REDMINE_BASE_URL = 'http://192.168.12.146:8081' 
+
+  SMTP_PARAMS = {
+    address: 'email.gpnof.ru',
+    port: 587,
+    user_name: 'test_help@gpnof.ru',
+    password: 'xYk!4!!V-7',
+    authentication: :login,
+    enable_starttls_auto: true,
+    open_timeout: 10,
+    read_timeout: 30
+  }
+
+  # ID ГРУППЫ, АКТИВНОСТЬ КОТОРОЙ ОТСЛЕЖИВАЕТСЯ (Группа 609)
+  REPORT_GROUP_ID = 609 
+  
+  # ID ГРУППЫ, ПОЛЬЗОВАТЕЛЯМ КОТОРОЙ НУЖНО ОТПРАВИТЬ ОТЧЕТ (Группа 614)
+  # RECIPIENT_GROUP_ID = 614 
+  RECIPIENT_GROUP_ID = 616
+
+  REPORT_PERIOD_DAYS = 1 # Отчет за 7 дней (неделя)
+
+  # Теперь это АДРЕС ОТПРАВИТЕЛЯ
+  REPORT_FROM_EMAIL = 'test_help@gpnof.ru'
+  # REPORT_TO_EMAIL больше не используется как константа, т.к. адреса динамические
+end
+
+# Настройка почты
+Mail.defaults do
+  delivery_method :smtp, Config::SMTP_PARAMS
+end
+
+# --- КЛАСС ДЛЯ ГЕНЕРАЦИИ ОТЧЕТА ---
+
+class RedmineReportGenerator
+  attr_reader :start_date, :end_date, :conn, :group_id, :recipient_group_id
+
+  def initialize(start_date, end_date, group_id, recipient_group_id)
+    @start_date = start_date
+    @end_date = end_date
+    @group_id = group_id
+    @recipient_group_id = recipient_group_id # Сохраняем ID группы-получателя
+    @conn = nil
+  end
+
+  # Запросы SQL
+  SQL_QUERIES = {
+    # ... (Остальные запросы без изменений)
+    group_users: <<-SQL,
+      SELECT u.id, u.firstname, u.lastname
+      FROM users u
+      JOIN groups_users gu ON gu.user_id = u.id
+      WHERE gu.group_id = $1
+      ORDER BY u.lastname, u.firstname
+    SQL
+    
+    # НОВЫЙ ЗАПРОС: Получение email-адресов для всех активных пользователей в группе
+    group_emails: <<-SQL,
+      SELECT DISTINCT ea.address
+      FROM users u
+      JOIN groups_users gu ON gu.user_id = u.id
+      JOIN email_addresses ea ON ea.user_id = u.id
+      WHERE gu.group_id = $1
+        AND u.status = 1
+        AND ea.is_default = true
+    SQL
+    closed_issues_by_user: <<-SQL,
+      SELECT 
+        closer.id as user_id,
+        closer.firstname,
+        closer.lastname,
+        COUNT(DISTINCT i.id) as closed_count
+      FROM issues i
+      JOIN journals j ON j.journalized_id = i.id AND j.journalized_type = 'Issue'
+      JOIN journal_details jd ON jd.journal_id = j.id
+      JOIN users closer ON closer.id = j.user_id
+      JOIN groups_users gu ON gu.user_id = closer.id
+      WHERE j.created_on BETWEEN $1 AND $2
+        AND jd.prop_key = 'status_id'
+        AND jd.value IN (SELECT id::text FROM issue_statuses WHERE is_closed = true)
+        AND gu.group_id = $3
+      GROUP BY closer.id, closer.firstname, closer.lastname
+      ORDER BY closed_count DESC, closer.lastname, closer.firstname
+    SQL
+    user_closed_issues_detail: <<-SQL,
+      SELECT DISTINCT
+        i.id as issue_id,
+        i.subject,
+        i.created_on,
+        i.closed_on,
+        s.name as status_name,
+        j.created_on as closed_date
+      FROM issues i
+      JOIN issue_statuses s ON s.id = i.status_id
+      JOIN journals j ON j.journalized_id = i.id AND j.journalized_type = 'Issue'
+      JOIN journal_details jd ON jd.journal_id = j.id
+      JOIN users closer ON closer.id = j.user_id
+      JOIN groups_users gu ON gu.user_id = closer.id
+      WHERE j.created_on BETWEEN $1 AND $2
+        AND jd.prop_key = 'status_id'
+        AND jd.value IN (SELECT id::text FROM issue_statuses WHERE is_closed = true)
+        AND gu.group_id = $3
+        AND closer.id = $4
+      ORDER BY j.created_on DESC
+    SQL
+    assigned_open_issues: <<-SQL,
+      SELECT 
+        i.id,
+        i.subject,
+        i.created_on,
+        s.name as status_name,
+        i.assigned_to_id,
+        assignee.firstname as assignee_firstname,
+        assignee.lastname as assignee_lastname,
+        u.firstname as author_firstname,
+        u.lastname as author_lastname
+      FROM issues i
+      JOIN issue_statuses s ON s.id = i.status_id
+      JOIN users u ON u.id = i.author_id
+      JOIN users assignee ON assignee.id = i.assigned_to_id
+      JOIN groups_users gu ON gu.user_id = assignee.id
+      WHERE s.is_closed = false
+        AND i.assigned_to_id IS NOT NULL
+        AND gu.group_id = $1
+      ORDER BY assignee.lastname, assignee.firstname, i.updated_on DESC
+    SQL
+    unassigned_open_issues: <<-SQL,
+      SELECT 
+        i.id,
+        i.subject,
+        i.created_on,
+        s.name as status_name,
+        u.firstname as author_firstname,
+        u.lastname as author_lastname
+      FROM issues i
+      JOIN issue_statuses s ON s.id = i.status_id
+      JOIN users u ON u.id = i.author_id
+      WHERE s.is_closed = false
+        AND i.assigned_to_id IS NULL
+      ORDER BY i.updated_on DESC
+    SQL
+    total_issues_closed: <<-SQL
+      SELECT COUNT(DISTINCT i.id) as total_count
+      FROM issues i
+      JOIN journals j ON j.journalized_id = i.id AND j.journalized_type = 'Issue'
+      JOIN journal_details jd ON jd.journal_id = j.id
+      JOIN users closer ON closer.id = j.user_id
+      JOIN groups_users gu ON gu.user_id = closer.id
+      WHERE j.created_on BETWEEN $1 AND $2
+        AND jd.prop_key = 'status_id'
+        AND jd.value IN (SELECT id::text FROM issue_statuses WHERE is_closed = true)
+        AND gu.group_id = $3
+    SQL
+  }
+
+  def run
+    connect_db
+    data = fetch_data
+    recipient_emails = fetch_recipient_emails # Получаем список адресов
+    html_report = generate_html(data)
+    send_email(html_report, data, recipient_emails) # Передаем список
+  ensure
+    @conn.close if @conn
+  end
+
+  private
+
+  def connect_db
+    puts "🔌 Подключаемся к базе данных..."
+    @conn = PG.connect(Config::DB_PARAMS)
+    puts "✅ Подключение установлено."
+  rescue PG::Error => e
+    raise "Ошибка подключения к базе данных: #{e.message}"
+  end
+
+  def fetch_data
+    # ... (Логика сбора данных для группы @group_id (609) без изменений)
+    puts "🔍 Выполняем запросы для периода: #{@start_date} - #{@end_date} (Группа отслеживания ##{@group_id})"
+    
+    # 1. Основные данные группы
+    group_users = @conn.exec_params(SQL_QUERIES[:group_users], [@group_id]).to_a
+    user_names = group_users.map { |u| [u['id'].to_i, "#{u['firstname']} #{u['lastname']}"] }.to_h
+
+    # 2. Метрики за период (Только закрыто)
+    closed_issues_count = @conn.exec_params(SQL_QUERIES[:total_issues_closed], [@start_date.to_s, @end_date.to_s, @group_id])[0]['total_count'].to_i
+
+    # 3. Активность пользователей
+    closed_issues_by_user = @conn.exec_params(SQL_QUERIES[:closed_issues_by_user], [@start_date.to_s, @end_date.to_s, @group_id]).to_a
+
+    # 4. Открытые заявки
+    assigned_open_issues = @conn.exec_params(SQL_QUERIES[:assigned_open_issues], [@group_id]).to_a
+    unassigned_open_issues = @conn.exec_params(SQL_QUERIES[:unassigned_open_issues]).to_a
+
+    # Вывод отладочной информации
+    puts "📊 Результаты запросов:"
+    puts "  - Группа отслеживания: #{group_users.count} пользователей"
+    puts "  - Задач закрыто: #{closed_issues_count}"
+    
+    {
+      group_users: group_users,
+      user_names: user_names,
+      closed_issues_count: closed_issues_count,
+      closed_issues_by_user: closed_issues_by_user,
+      assigned_open_issues: assigned_open_issues,
+      unassigned_open_issues: unassigned_open_issues
+    }
+  end
+
+  def fetch_recipient_emails
+    puts "📧 Собираем email-адреса для группы получателей ##{@recipient_group_id}..."
+    
+    # Используем recipient_group_id для запроса адресов
+    result = @conn.exec_params(SQL_QUERIES[:group_emails], [@recipient_group_id]).to_a
+    emails = result.map { |row| row['address'] }
+
+    if emails.empty?
+      raise "Не удалось найти активные email-адреса для группы получателей ##{@recipient_group_id}."
+    end
+    
+    puts "✅ Найдено #{emails.count} получателей: #{emails.join(', ')}"
+    emails
+  end
+
+  def generate_html(data)
+    html_report = "<!DOCTYPE html>"
+    html_report << "<html>"
+    html_report << "<head>"
+    html_report << "<meta charset='UTF-8'>"
+    html_report << "<title>Отчет Redmine</title>"
+    html_report << get_css_styles
+    html_report << "</head>"
+    html_report << "<body>"
+    
+    html_report << build_header
+    html_report << build_metrics(data)
+    html_report << build_user_activity_table(data)
+    html_report << build_assigned_open_issues_table(data[:assigned_open_issues])
+    html_report << build_unassigned_open_issues_table(data[:unassigned_open_issues])
+    
+    html_report << build_footer
+    
+    html_report << "</body>"
+    html_report << "</html>"
+    html_report
+  end
+  
+  def send_email(html_report, data, recipient_emails)
+    puts "📧 Отправляем отчет..."
+
+    report_group_id = @group_id
+    report_start_date = @start_date
+    report_end_date = @end_date
+    recipient_group_id = @recipient_group_id
+
+    mail = Mail.new do
+      from    Config::REPORT_FROM_EMAIL
+      # ИЗМЕНЕНИЕ: Используем собранный массив email-адресов
+      to      recipient_emails 
+      
+      subject "📊 Отчет Redmine (Группа отслеживания ##{report_group_id}, Получатель ##{recipient_group_id}) за #{report_start_date} - #{report_end_date}"
+      html_part do
+        content_type 'text/html; charset=UTF-8'
+        body html_report
+      end
+    end
+
+    mail.deliver!
+
+    puts "✅ Отчет успешно отправлен #{recipient_emails.count} получателям (Группа ##{recipient_group_id})"
+    puts "📊 Статистика: #{data[:closed_issues_count]} задач закрыто"
+  end
+
+  # --- ГЕНЕРАЦИЯ HTML КОМПОНЕНТОВ (Без изменений) ---
+
+  def get_css_styles
+    <<-CSS
+    <style>
+      body {
+        font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+        line-height: 1.6;
+        color: #343a40; /* Darker grey for text */
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 25px;
+        background-color: #f0f2f5; /* Light grey background */
+      }
+      .header {
+        background: #ffffff; /* White header */
+        color: #343a40; /* Dark text for header */
+        padding: 40px;
+        border-radius: 12px;
+        margin-bottom: 35px;
+        text-align: center;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+        border-top: 8px solid #007bff; /* Primary blue accent */
+      }
+      .header h1 {
+        margin: 0;
+        font-size: 36px;
+        font-weight: 700;
+        color: #212529; /* Even darker for main title */
+      }
+      .period {
+        font-size: 20px;
+        color: #6c757d; /* Muted grey for period */
+        margin-top: 15px;
+      }
+      .section {
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 30px;
+        margin-bottom: 25px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+        border-left: 6px solid #6c757d; /* Muted grey border */
+      }
+      .section h2 {
+        color: #212529;
+        margin-top: 0;
+        margin-bottom: 25px;
+        font-size: 26px;
+        border-bottom: 2px solid #e9ecef;
+        padding-bottom: 15px;
+        font-weight: 600;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 20px;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      th {
+        background: #007bff; /* Primary blue for table headers */
+        color: white;
+        padding: 15px 18px;
+        text-align: left;
+        font-weight: 600;
+        border: none;
+      }
+      td {
+        padding: 14px 18px;
+        border-bottom: 1px solid #dee2e6; /* Light grey border */
+        background-color: #ffffff;
+      }
+      tr:nth-child(even) td {
+        background-color: #f8f9fa; /* Slightly off-white for even rows */
+      }
+      tr:hover td {
+        background-color: #e2f2ff; /* Light blue on hover */
+      }
+      .total-row td {
+        background-color: #e0f2f7; /* Light cyan for total */
+        font-weight: bold;
+        border-top: 2px solid #007bff;
+      }
+      .metrics {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 25px;
+        margin-bottom: 35px;
+      }
+      .metric-card {
+        background: #ffffff;
+        padding: 25px;
+        border-radius: 12px;
+        text-align: center;
+        box-shadow: 0 3px 10px rgba(0,0,0,0.05);
+        border-top: 6px solid #6c757d; /* Default muted border */
+      }
+      /* Individual metric card border colors */
+      .metric-card.total-closed { border-top-color: #28a745; } /* Green */
+      .metric-card.active-users { border-top-color: #007bff; } /* Blue */
+
+      .metric-value {
+        font-size: 40px;
+        font-weight: 700;
+        color: #212529; /* Darker for values */
+        margin: 15px 0 10px;
+      }
+      .metric-label {
+        color: #6c757d;
+        font-size: 15px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+      }
+      .status-open { color: #dc3545; font-weight: bold; } /* Red */
+      .status-in-progress { color: #ffc107; font-weight: bold; } /* Yellow/Orange */
+      .status-closed { color: #28a745; font-weight: bold; } /* Green */
+      .user-avatar {
+        display: inline-flex; /* Use flex for perfect centering */
+        align-items: center;
+        justify-content: center;
+        width: 40px; /* Slightly larger */
+        height: 40px;
+        background: #007bff; /* Primary blue */
+        color: white;
+        border-radius: 50%;
+        font-weight: bold;
+        font-size: 16px;
+        margin-right: 10px;
+        vertical-align: middle;
+        flex-shrink: 0; /* Prevent shrinking in flex container */
+      }
+      .user-section {
+        margin-bottom: 22px;
+        border: 1px solid #e9ecef;
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      .user-summary {
+        padding: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .no-activity {
+        background-color: #fff3cd; /* Light warning yellow */
+        color: #856404;
+      }
+      .has-activity {
+        background-color: #d4edda; /* Light success green */
+        color: #155724;
+      }
+      .user-stats {
+        padding: 8px 15px;
+        background: white;
+        border-radius: 8px;
+        font-size: 15px;
+        font-weight: 600;
+        border: 1px solid #ced4da;
+      }
+      .user-details-content {
+        padding: 20px;
+        background-color: #f8f9fa;
+        border-top: 1px solid #e9ecef;
+      }
+      .section-title {
+        color: #212529;
+        margin-top: 35px;
+        margin-bottom: 20px;
+        font-size: 22px;
+        padding-bottom: 12px;
+        border-bottom: 2px solid #e9ecef;
+        font-weight: 600;
+      }
+      .user-row td {
+          background-color: #e9f0f9 !important; /* Lighter blue for user rows in tables */
+          font-weight: 600;
+          border-top: 2px solid #cce5ff; /* Light blue border */
+      }
+      .user-row .user-avatar {
+          background: #0056b3; /* Darker blue for avatars in user rows */
+      }
+      .footer {
+        text-align: center;
+        margin-top: 50px;
+        color: #6c757d;
+        font-size: 14px;
+        border-top: 1px solid #e9ecef;
+        padding-top: 25px;
+      }
+    </style>
+    CSS
+  end
+
+  def build_header
+    <<-HTML
+    <div class='header'>
+      <h1>📊 Отчет активности Redmine (Группа отслеживания ##{group_id})</h1>
+      <div class='period'>Период: <b>#{@start_date} - #{@end_date}</b></div>
+    </div>
+    HTML
+  end
+
+  def build_metrics(data)
+    group_users_count = data[:group_users].count
+    active_users_count = data[:closed_issues_by_user].count
+
+    html = "<div class='metrics'>"
+    html << <<-HTML
+      <div class='metric-card total-closed'>
+        <div class='metric-label'>Задач завершено</div>
+        <div class='metric-value'>#{data[:closed_issues_count]}</div>
+        <div>закрыты в период</div>
+      </div>
+      <div class='metric-card active-users'>
+        <div class='metric-label'>Активных пользователей</div>
+        <div class='metric-value'>#{active_users_count}/#{group_users_count}</div>
+        <div>закрывали заявки</div>
+      </div>
+    HTML
+    html << "</div>"
+    html
+  end
+
+  def build_user_activity_table(data)
+    closed_issues_by_user = data[:closed_issues_by_user]
+    group_users = data[:group_users]
+    
+    closed_counts = closed_issues_by_user.map { |row| [row['user_id'].to_i, row['closed_count'].to_i] }.to_h
+
+    active_users = []
+    inactive_users = []
+
+    group_users.each do |user|
+      user_id = user['id'].to_i
+      closed_count = closed_counts[user_id] || 0
+      
+      user_data = { user: user, closed_count: closed_count }
+      if closed_count > 0
+        active_users << user_data
+      else
+        inactive_users << user_data
+      end
+    end
+
+    active_users.sort_by! { |d| -d[:closed_count] }
+
+    html = "<div class='section'>"
+    html << "<h2>👥 Активность пользователей группы (Закрытые заявки)</h2>"
+    
+    if inactive_users.any?
+      html << "<div class='section-title'>🙅‍♂️ Пользователи без закрытых заявок</div>"
+      inactive_users.each do |d|
+        user = d[:user]
+        user_initials = "#{user['firstname'][0]}#{user['lastname'][0]}"
+        html << "<div class='user-section'>"
+        html << "<div class='user-summary no-activity'>"
+        html << "<div><span class='user-avatar'>#{user_initials}</span><strong>#{user['firstname']} #{user['lastname']}</strong></div>"
+        html << "<span class='user-stats'>Закрыто задач: #{d[:closed_count]}</span>"
+        html << "</div>"
+        html << "</div>"
+      end
+    end
+
+    if active_users.any?
+      html << "<div class='section-title'>✅ Активные пользователи</div>"
+      active_users.each do |d|
+        user = d[:user]
+        user_id = user['id'].to_i
+        user_initials = "#{user['firstname'][0]}#{user['lastname'][0]}"
+        
+        html << "<div class='user-section'>"
+        html << "<div class='user-summary has-activity'>"
+        html << "<div><span class='user-avatar'>#{user_initials}</span><strong>#{user['firstname']} #{user['lastname']}</strong></div>"
+        html << "<span class='user-stats'>Закрыто задач: #{d[:closed_count]}</span>"
+        html << "</div>"
+        
+        user_closed_issues = @conn.exec_params(SQL_QUERIES[:user_closed_issues_detail], 
+                                               [@start_date.to_s, @end_date.to_s, @group_id, user_id])
+        
+        if user_closed_issues.ntuples > 0
+          html << "<div class='user-details-content'>"
+          html << "<table>"
+          html << "<tr><th>ID задачи</th><th>Тема</th><th>Дата создания</th><th>Дата закрытия</th><th>Статус</th></tr>"
+          
+          user_closed_issues.each do |issue| 
+            closed_date = issue['closed_date'] ? issue['closed_date'][0,10] : (issue['closed_on'] ? issue['closed_on'][0,10] : '—')
+            status_class = issue['status_name'].downcase.include?('закрыт') ? 'status-closed' : 'status-open'
+            
+            subject = issue['subject']
+            subject_short = subject.length > 80 ? subject[0..77] + '...' : subject
+            
+            issue_id = issue['issue_id']
+            issue_link = "#{Config::REDMINE_BASE_URL}/issues/#{issue_id}" 
+
+            html << "<tr>"
+            html << "<td><a href='#{issue_link}' target='_blank' style='text-decoration:none; color:#007bff;'><strong>##{issue_id}</strong></a></td>" 
+            html << "<td title='#{subject}'>#{subject_short}</td>"
+            html << "<td>#{issue['created_on'][0,10]}</td>"
+            html << "<td>#{closed_date}</td>"
+            html << "<td><span class='#{status_class}'>#{issue['status_name']}</span></td>"
+            html << "</tr>"
+          end 
+          
+          html << "</table>"
+          html << "</div>"
+        end 
+        
+        html << "</div>" 
+      end
+    end
+    
+    html << "</div>"
+    html
+  end
+
+  def build_assigned_open_issues_table(assigned_issues)
+    return "<div class='section'><h2>👤 Открытые заявки (с исполнителем из группы)</h2><p>Нет открытых заявок, назначенных пользователям группы.</p></div>" if assigned_issues.empty?
+
+    html = "<div class='section'>"
+    html << "<h2>👤 Открытые заявки (с исполнителем из группы)</h2>"
+    html << "<table>"
+    html << "<tr><th>ID</th><th>Тема</th><th>Дата создания</th><th>Статус</th><th>Автор</th></tr>"
+    
+    assigned_issues.group_by { |i| i['assigned_to_id'].to_i }.each do |assignee_id, issues|
+      assignee = issues.first
+      user_initials = "#{assignee['assignee_firstname'][0]}#{assignee['assignee_lastname'][0]}"
+      
+      html << "<tr class='user-row'><td colspan='5'><span class='user-avatar'>#{user_initials}</span><strong>Исполнитель: #{assignee['assignee_firstname']} #{assignee['assignee_lastname']}</strong></td></tr>"
+      
+      issues.each do |issue|
+        status_class = case issue['status_name'].downcase
+                       when /в работе|in progress/ then 'status-in-progress'
+                       else 'status-open'
+                       end
+        
+        subject = issue['subject']
+        subject_short = subject.length > 80 ? subject[0..77] + '...' : subject
+
+        issue_id = issue['id']
+        issue_link = "#{Config::REDMINE_BASE_URL}/issues/#{issue_id}" 
+        
+        html << "<tr>"
+        html << "<td><a href='#{issue_link}' target='_blank' style='text-decoration:none; color:#007bff;'><strong>##{issue_id}</strong></a></td>"
+        html << "<td title='#{subject}'>#{subject_short}</td>"
+        html << "<td>#{issue['created_on'][0,10]}</td>"
+        html << "<td><span class='#{status_class}'>#{issue['status_name']}</span></td>"
+        html << "<td>#{issue['author_firstname']} #{issue['author_lastname']}</td>"
+        html << "</tr>"
+      end
+    end
+    
+    html << "</table>"
+    html << "</div>"
+    html
+  end
+
+  def build_unassigned_open_issues_table(unassigned_issues)
+    return "<div class='section'><h2>❓ Открытые заявки без исполнителя</h2><p>Нет открытых заявок без исполнителя.</p></div>" if unassigned_issues.empty?
+
+    html = "<div class='section'>"
+    html << "<h2>❓ Открытые заявки без исполнителя</h2>"
+    html << "<table>"
+    html << "<tr><th>ID</th><th>Тема</th><th>Дата создания</th><th>Статус</th><th>Автор</th></tr>"
+    
+    unassigned_issues.each do |issue|
+      status_class = case issue['status_name'].downcase
+                     when /в работе|in progress/ then 'status-in-progress'
+                     else 'status-open'
+                     end
+      
+      subject = issue['subject']
+      subject_short = subject.length > 80 ? subject[0..77] + '...' : subject
+
+      issue_id = issue['id']
+      issue_link = "#{Config::REDMINE_BASE_URL}/issues/#{issue_id}" 
+      
+      html << "<tr>"
+      html << "<td><a href='#{issue_link}' target='_blank' style='text-decoration:none; color:#007bff;'><strong>##{issue_id}</strong></a></td>"
+      html << "<td title='#{subject}'>#{subject_short}</td>"
+      html << "<td>#{issue['created_on'][0,10]}</td>"
+      html << "<td><span class='#{status_class}'>#{issue['status_name']}</span></td>"
+      html << "<td>#{issue['author_firstname']} #{issue['author_lastname']}</td>"
+      html << "</tr>"
+    end
+    
+    html << "</table>"
+    html << "</div>"
+    html
+  end
+
+  def build_footer
+    <<-HTML
+    <div class='footer'>
+      <p>Отчет сгенерирован автоматически • #{Date.today} • Группа отслеживания: ##{group_id} / Группа получателей: ##{Config::RECIPIENT_GROUP_ID}</p>
+    </div>
+    HTML
+  end
+end
+
+# --- ТОЧКА ВХОДА ---
+
+begin
+  end_date = Date.today
+  start_date = end_date - Config::REPORT_PERIOD_DAYS
+
+  puts "🚀 Запуск генератора отчетов Redmine..."
+  
+  # Используем REPORT_GROUP_ID (609) для сбора данных и RECIPIENT_GROUP_ID (614) для получателей
+  generator = RedmineReportGenerator.new(
+    start_date, 
+    end_date, 
+    Config::REPORT_GROUP_ID, 
+    Config::RECIPIENT_GROUP_ID # Передаем ID группы получателей в конструктор
+  )
+  generator.run
+  
+rescue => e
+  puts "💥 КРИТИЧЕСКАЯ ОШИБКА: #{e.message}"
+  puts e.backtrace
+end
+
+
+################################################################################
+📄 FILE: ./config/supervisord.conf
+################################################################################
+[supervisord]
+nodaemon=true
+logfile=/var/log/supervisord.log
+logfile_maxbytes=10MB
+logfile_backups=5
+loglevel=info
+pidfile=/tmp/supervisord.pid
+
+[program:redmine]
+command=/docker-entrypoint.sh rails server -b 0.0.0.0
+directory=/usr/src/redmine
+autostart=true
+autorestart=true
+startsecs=20
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+environment=RAILS_ENV="production"
+
+[program:email_receive]
+command=/bin/bash -c "while true; do /usr/local/bin/email_receive; sleep 10; done"
+directory=/usr/src/redmine
+autostart=true
+autorestart=true
+startsecs=5
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/usr/src/redmine/log/email_receive.log
+stderr_logfile=/usr/src/redmine/log/email_receive.error.log
+environment=RAILS_ENV="production",LANG="C.UTF-8"
+
+[program:redmine_email_reports]
+command=/bin/bash -c "cd /usr/src/redmine && while true; do bundle exec rake email_reports:send_pending RAILS_ENV=production; sleep 60; done"
+autostart=true
+autorestart=true
+stdout_logfile=/var/log/supervisor/email_reports.out.log
+stderr_logfile=/var/log/supervisor/email_reports.err.log
+# user=redmine
+environment=RAILS_ENV="production",TZ="Europe/Moscow"
+
+
+
+
+################################################################################
+📄 FILE: ./docker-compose.yml
+################################################################################
+services:
+  redmine:
+    container_name: redmine-test-environment
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5555:3000"
+    volumes:
+      - ./storage/shared:/usr/src/redmine/shared
+      - ./storage/redmine/attachment_files:/usr/src/redmine/files
+      - ./storage/redmine/plugins:/usr/src/redmine/plugins
+      - ./storage/redmine/themes:/usr/src/redmine/themes
+      - ./storage/redmine/log:/usr/src/redmine/log
+      # ИЗМЕНЕНО: специфичные логи вместо общей директории
+      - ./logs/redmine:/var/log/redmine
+      - ./logs/supervisor:/var/log/supervisor
+    env_file: .env
+    environment:
+      TZ: "Europe/Moscow"
+      REDMINE_DB_POSTGRES: "postgres"
+      REDMINE_DB_USERNAME: "postgres"
+      # УБРАНО: невалидный ERB синтаксис
+      # REDMINE_DB_PASSWORD: "<%= ENV['REDMINE_DB_PASSWORD'] %>"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always
+
+  postgres:
+    container_name: postgres-test-environment
+    image: postgres:18
+    ports:
+      - "6543:5432"
+    volumes:
+      - ./storage/postgresql-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_PASSWORD: "PASSWORD"
+      POSTGRES_DB: "redmine"
+      PGDATA: "/var/lib/postgresql/data/pgdata"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+#  backup_redmine:
+#    container_name: backup_redmine_service
+#    build:
+#      context: .
+#      dockerfile: Dockerfile.backup 
+#    volumes:
+#      - ./storage/redmine/attachment_files:/usr/src/redmine/files:ro
+#      - ./config/backup.sh:/usr/local/bin/backup.sh:ro
+#      - /mnt/win_backup:/remote_backup:rw 
+#    env_file: .env
+#    depends_on:
+#      - postgres
+#    restart: always
+
+volumes:
+  pg_data:
+  redmine_data:
+
+
+
+################################################################################
+📄 FILE: ./Dockerfile
+################################################################################
+FROM redmine:6.1.0
+
+# Установка системных зависимостей
+RUN apt-get update && \
+    apt-get install -y supervisor passenger curl && \
+    rm -rf /var/lib/apt/lists/*
+
+# Установка необходимых гемов
+RUN gem install whenever -v '1.0.0' && \
+    gem install chronic -v '0.10.2' && \
+    bundle config set without 'development test' && \
+    bundle install
+
+# Копирование конфигурации Supervisor
+COPY config/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Копирование скрипта приема почты
+COPY config/email_receive.sh /usr/local/bin/email_receive
+RUN chmod +x /usr/local/bin/email_receive
+
+# Запуск через Supervisor
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+
+
+################################################################################
+📄 FILE: ./Dockerfile.backup
+################################################################################
+FROM alpine:3.20
+
+RUN apk add --no-cache postgresql-client bash procps tar gzip perl ca-certificates
+
+WORKDIR /work
+CMD ["pg_dump", "--version"]
+
+
+################################################################################
+📄 FILE: ./.env
+################################################################################
+REDMINE_DB_PASSWORD=PASSWORD
+POSTGRES_PASSWORD=PASSWORD
+PGPASSWORD=PASSWORD
+IMAP_PASSWORD=xYk!4!!V-7
+SMTP_PASSWORD=xYk!4!!V-7
+SECRET_KEY_BASE=1b30813e853a4b4499df6c3a863cb5a97e9b26236ddfab3ca5125b62a476dfbf105d748c57844bebd3ba0b2a6dcfea3d23fe251c71fa475d0eff08a628ba230d
+REDMINE_BASE_URL=http://192.168.12.146:8081
+REPORT_GROUP_ID=609
+REPORT_RECIPIENT_GROUP_ID=616
+REPORT_PERIOD_DAYS=1
+REPORT_FROM_EMAIL=test_help@gpnof.ru
+SMTP_ADDRESS=email.gpnof.ru
+SMTP_PORT=587
+SMTP_AUTH=login
+SMTP_STARTTLS=true
+IMAP_HOST=email.gpnof.ru
+IMAP_PORT=993
+IMAP_SSL=true
+IMAP_USERNAME=test_help@gpnof.ru
+
+
+################################################################################
+📄 FILE: ./project.txt
+################################################################################
+
+
+
+################################################################################
+📄 FILE: ./storage/redmine/plugins/README
+################################################################################
+Put your Redmine plugins here.
+
+
+
+################################################################################
+📄 FILE: ./storage/shared/application.css
+################################################################################
+/**
+ * Redmine - project management software
+ * Copyright (C) 2006-  Jean-Philippe Lang
+ * This code is released under the GNU General Public License.
+ */
+
+@font-face {
+  font-family: "Noto Sans";
+  src: url("/NotoSans-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Noto Sans";
+  src: url("/NotoSans-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Noto Sans";
+  src: url("/NotoSans-Italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Noto Sans";
+  src: url("/NotoSans-BoldItalic.woff2") format("woff2");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  --fonts-main: "Noto Sans", sans-serif;
+}
+
+html, body { min-height: 100vh; }
+html {overflow-y:scroll;}
+body { font-family: var(--fonts-main); font-size: 0.875rem; color:#333; margin: 0; padding: 0; min-width: 900px; }
+
+h1, h2, h3, h4, h5, h6 {font-family: var(--fonts-main);padding: 2px 10px 1px 0px;margin: 0 0 10px 0;}
+#content h1, h2, h3, h4, h5, h6 {color: #555;}
+h2 {font-size: 1.25rem;}
+h3 {font-size: 1.0625rem;}
+h4 {font-size: 0.875rem; border-bottom: 1px solid #ccc; font-weight:normal;}
+pre, code {font-family: Consolas, Menlo, "Liberation Mono", Courier, monospace;}
+.wiki h1 {font-size: 1.6em;}
+.wiki h2 {font-size: 1.4em;}
+.wiki h3 {font-size: 1.2em;}
+.wiki h4 {font-size: 1.1em; border: none; font-weight: bold;}
+.wiki h5 {font-size: 1em;}
+.wiki h6 {font-size: 1em; color: #8e8e8e;}
+
+/***** Layout *****/
+#wrapper {
+  min-height: inherit;
+  background: white;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#top-menu {background: #3E5B76; color: #fff; font-size: 0.8em; padding: 2px 10px 2px 12px;}
+#top-menu ul {margin: 0;  padding: 0;}
+#top-menu li {
+  float:left;
+  list-style-type:none;
+  margin: 0px 0px 0px 0px;
+  padding: 0px 0px 0px 0px;
+  white-space:nowrap;
+}
+#top-menu a {color: #fff; margin-right: 8px; font-weight: bold;}
+#top-menu #loggedas { float: right; margin-right: 0.5em; color: #fff; }
+
+#account {float:right;}
+
+#header {
+  min-height: 8.7ex;
+  margin: 0;
+  background: linear-gradient(180deg, #628DB6 30%, #356D92);
+  color: #f8f8f8;
+  padding: 4px 16px 20px 16px;
+  position: relative;
+}
+#header a {color:#f8f8f8;}
+#header h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.4375rem; font-weight: normal;}
+#header h1 .breadcrumbs { display:block; font-size: 0.8rem; font-weight: normal; line-height: 100%;}
+
+#quick-search {float:right;}
+#quick-search #q {width:130px; height:24px; box-sizing:border-box; vertical-align:middle; border:1px solid #ccc; border-radius:3px;}
+#quick-search form {float:left; margin-right:3px;}
+#quick-search form input {margin-top:0; margin-bottom:0;}
+#quick-search form label {vertical-align:middle;}
+#quick-search #project-jump {float:left;}
+
+#main-menu {position: absolute;  bottom: 0px;  left: 10px; margin-right: -500px; width: 100%;}
+#main-menu ul {margin: 0;  padding: 0; width: 100%; white-space: nowrap;}
+#main-menu li {
+  float:none;
+  list-style-type:none;
+  margin: 0px 2px 0px 0px;
+  padding: 0px 0px 0px 0px;
+  white-space:nowrap;
+  display:inline-block;
+}
+#main-menu li a {
+  display: block;
+  color: #fff;
+  text-decoration: none;
+  font-size: 93%;
+  margin: 0;
+  padding: 4px 10px 4px 10px;
+  border-top-left-radius: 3px;
+  border-top-right-radius: 3px;
+}
+#main-menu li a:hover {background: #759FCF; color: #fff; }
+#main-menu li:hover ul.menu-children, #main-menu li ul.menu-children.visible {display: block;}
+#main-menu li a.selected, #main-menu li a.selected:hover {background: #fff; color: #555; font-weight: bold;}
+#main-menu li a.new-object {background-color: #759FCF; }
+
+#main-menu .menu-children {
+  display: none;
+  position:absolute;
+  width: inherit;
+  z-index:45;
+  background-color:#fff;
+  border-right: 1px solid #759FCF;
+  border-bottom: 1px solid #759FCF;
+  border-left: 1px solid #759FCF;
+}
+#main-menu .menu-children li {float:left; clear:both; width:100%;}
+#main-menu .menu-children li a {color: #555; background-color:#fff; font-weight:normal; border-radius: 0;}
+#main-menu .menu-children li a:hover {color: #fff; background-color: #759FCF;}
+
+#main-menu .tabs-buttons {
+  right: 6px;
+  background-color: transparent;
+  border-bottom-color: transparent;
+}
+
+#admin-menu ul {margin: 0;  padding: 0;}
+#admin-menu li {margin: 0;  padding: 0 0 6px 0; list-style-type:none;}
+
+#main {flex-grow: 2; display: flex; flex-direction: row-reverse;}
+
+#sidebar{ font-size: 0.8125rem; flex-shrink: 0; padding-left: 20px; padding-right: 8px; background: #f9fafb; border-left: 1px solid #d0d7de}
+@media screen and (min-width: 0px) and (max-width: 1089px) {#sidebar{width: 22%;}}
+@media screen and (min-width: 1090px) and (max-width: 1279px) {#sidebar{width: 240px;}}
+@media screen and (min-width: 1280px) and (max-width: 1599px) {#sidebar{width: 280px;}}
+@media screen and (min-width: 1600px) and (max-width: 1919px) {#sidebar{width: 320px;}}
+@media screen and (min-width: 1920px) and (max-width: 2559px) {#sidebar{width: 360px;}}
+@media screen and (min-width: 2560px) {#sidebar{width: 380px;}}
+#sidebar h3{ font-size: 0.875rem; margin-top: 14px; color: #555; }
+#sidebar h3:first-child{ margin-top: 0; }
+#sidebar hr{ width: 100%; margin: 0 auto; height: 1px; background: #ccc; border: 0; }
+#sidebar .contextual { margin-right: 1em; }
+#sidebar ul, ul.flat {margin: 0;  padding: 0;}
+#sidebar ul li, ul.flat li {list-style-type:none;margin: 0px 2px 0px 0px; padding: 0px 0px 0px 0px;}
+#sidebar div.wiki ul {margin:inherit; padding-left:40px;}
+#sidebar div.wiki ul li {list-style-type:inherit;}
+#sidebar a.icon-only svg {opacity: 0.2; margin-left: 5px;}
+#sidebar a.icon-only:hover svg {opacity: 1;}
+#sidebar span.icon-warning {margin-left: 5px;}
+#sidebar li input[type=checkbox] {height: 20px;}
+
+#sidebar-switch-panel {
+  margin-left: -20px;
+  padding-right: 28px;
+  width: 100%;
+}
+
+#sidebar-switch-button {
+  display: block;
+  padding: 3px 0;
+  padding-right: 28px;
+  width: 100%;
+}
+
+#sidebar-switch-button svg {
+  stroke: #555;
+}
+
+#sidebar-switch-button:hover {
+  background-color: #eeeeee;
+}
+
+#content { flex-grow: 1; background-color: #fff; margin: 0px; padding: 10px 16px 10px 16px; overflow-x: auto;}
+
+#main.nosidebar #sidebar { display: none; }
+#main.collapsedsidebar #sidebar { width: 0; padding-right: 0 }
+#main.collapsedsidebar #sidebar-wrapper { display: none; }
+
+#footer {clear: both; border-top: 1px solid #d0d7de; font-size: 0.9em; color: #aaa; padding: 5px; text-align:center; background:#fff;}
+
+#login-form {margin:5em auto 2em auto; padding:20px; width:340px; border:1px solid #FDBF3B; background-color:#FFEBC1; border-radius:4px; box-sizing: border-box;}
+#login-form label {display:block; margin-bottom:5px; font-weight:bold;}
+#login-form label[for=autologin] {font-weight:normal;}
+#login-form input {height: 29px;}
+#login-form input[type=text], #login-form input[type=password], #login-form input[type=submit] {display: block; width: 100%;}
+#login-form input[type=text], #login-form input[type=password] {margin-bottom: 15px;}
+#login-form a.lost_password {float:right; font-weight:normal;}
+#login-form h3 {text-align: center;}
+
+div.modal { border-radius:5px; background:#fff; z-index:50; padding:4px;}
+div.modal h3.title {display:none;}
+div.modal p.buttons {margin-bottom:0;}
+div.modal .box p {margin: 0.3em 0;}
+
+.clear:after{ content: "."; display: block; height: 0; clear: both; visibility: hidden; }
+
+.mobile-show {display: none;}
+.hidden {display: none;}
+.inline-block {display: inline-block;}
+.inline-flex {display: inline-flex;}
+.decoration-red, a.decoration-red {color: #c22 !important;}
+
+/***** Links *****/
+a, a:link, a:visited{ color: #169; text-decoration: none; }
+a:hover, a:active{ color: #c61a1a; text-decoration: underline;}
+a img{ border: 0; }
+
+a.issue.closed, a.issue.closed:link, a.issue.closed:visited { color: #999; text-decoration: line-through; }
+a.project.closed, a.project.closed:link, a.project.closed:visited { color: #999; }
+a.user.locked, a.user.locked:link, a.user.locked:visited {color: #999;}
+a.user.user-mention {
+  background-color: #DDEEFF;
+  padding: 0.1em 0.1em;
+  border-radius: 0.1em;
+}
+
+#sidebar a.selected {line-height:1.7em; padding:1px 3px 2px 2px; margin-left:-2px; background-color:#9DB9D5; color:#fff; border-radius:2px;}
+#sidebar a.selected:hover {text-decoration:none;}
+#sidebar a.selected svg.icon-svg { stroke: #fff !important; }
+#sidebar .query.default {font-weight: bold;}
+#admin-menu a {line-height:1.7em;}
+#admin-menu a.selected:not(:has(svg))  {padding-left: 20px !important; background-position: 2px 40%;}
+
+a#toggle-completed-versions {color:#999;}
+a#toggle-completed-versions span.icon-label {margin-left: 0}
+a#toggle-completed-versions svg, a#toggle-completed-versions:hover svg {stroke:#999}
+
+/***** Dropdown *****/
+.drdn {position:relative;}
+.drdn-trigger {
+  box-sizing:border-box;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  cursor:pointer;
+  user-select:none;
+  -moz-user-select:none;
+  -webkit-user-select:none;
+}
+.drdn-content {
+  display:none;
+  position:absolute;
+  right:0px;
+  top:25px;
+  min-width:100px;
+  background-color:#fff;
+  border:1px solid #ccc;
+  border-radius:4px;
+  color:#555;
+  z-index:99;
+}
+.drdn.expanded .drdn-content {display:block;}
+
+.drdn-content .quick-search {margin:8px; display: flex; align-items: center;}
+.drdn-content .quick-search svg {margin-left: 5px; position: absolute;}
+.drdn-content .quick-search input.autocomplete {background: none; padding-left: 24px !important;}
+.drdn-content .autocomplete {box-sizing: border-box; width:100% !important; height:28px;}
+.drdn-content .autocomplete:focus {border-color:#5ad;}
+.drdn-items {max-height:400px; overflow:auto;}
+div + .drdn-items {border-top:1px solid #ccc;}
+.drdn-items>* {
+  display:block;
+  border:1px solid #fff;
+  overflow:hidden;
+  text-overflow: ellipsis;
+  white-space:nowrap;
+  padding:4px 8px;
+}
+.drdn-items>a:hover {text-decoration:none;}
+.drdn-items>*:focus {border:1px dotted #bbb;}
+
+.drdn-items.selection>*:before {
+  content:' ';
+  display:inline-block;
+  line-height:1em;
+  width:1em;
+  height:1em;
+  margin-right:4px;
+  font-weight:bold;
+}
+.drdn-items.selection>*.selected:before {
+  content:"\2713 ";
+}
+.drdn-items.selection:empty {
+  border: none;
+}
+.drdn-items>span {color:#999;}
+
+.contextual .drdn-content, .journal-actions .drdn-content {
+  top: 18px;
+}
+
+.contextual .drdn-items, .journal-actions .drdn-items {
+  padding: 2px;
+  min-width: 160px;
+}
+
+.contextual .drdn-items > a, .journal-actions .drdn-items > a {
+  display: flex;
+  padding: 5px 8px;
+}
+
+.contextual .drdn-items > a.icon:not(:has(svg)), .journal-actions .drdn-items > a.icon:not(:has(svg)) {
+  padding-left: 24px;
+  background-position-x: 4px;
+}
+
+.contextual .drdn-items > a:hover, .journal-actions .drdn-items > a:hover {
+  color: #2A5685;
+  border: 1px solid #628db6;
+  background-color: #eef5fd;
+  border-radius: 3px;
+}
+
+#project-jump.drdn {width:200px;display:inline-block;}
+#project-jump .drdn-trigger {
+  width:100%;
+  height:24px;
+  display:inline-block;
+  padding:1.5px 18px 3px 6px;
+  border-radius:3px;
+  border:1px solid #ccc;
+  margin:0 !important;
+  vertical-align:middle;
+  color:#555;
+  background:#fff url(/chevron-down.svg) no-repeat 98% 50%;
+}
+#project-jump .drdn.expanded .drdn-trigger {background-image:url(/arrow_up.png);}
+#project-jump .drdn-content {width:280px;}
+#project-jump .drdn-items>* {color:#555 !important;}
+#project-jump .drdn-items>a:hover {background-color:#759FCF; color:#fff !important;}
+
+/***** Tables *****/
+table.list, .table-list {
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  border-top: 1px solid #d0d7de;
+  border-bottom: 1px solid #d0d7de;
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 4px;
+  overflow: hidden;
+}
+table.list th, .table-list-header { background-color:#EEEEEE; padding: 4px; white-space:nowrap; font-weight:bold; border-bottom: 2px solid #d0d7de; }
+table.list th.whitespace-normal {white-space: normal;}
+table.list td {text-align:center; vertical-align:middle; padding-top: 3px; padding-right: 10px; padding-bottom: 3px; border-top: 1px solid #d0d7de;}
+table.list td.icon {width: 100%;} /* Prevents border from disappearing due to inline-flex shrinking */
+table.list td.id { width: 2%; text-align: center;}
+table.list td.name, table.list td.description, table.list td.subject, table.list td.parent-subject, table.list td.comments, table.list td.roles, table.list td.attachments, table.list td.text,  table.list td.short_description {text-align: left;}
+
+table.list td.attachments span {display: block; height: 16px;}
+table.list td.attachments span a.icon-download {display: inline-block; visibility: hidden;}
+table.list td.attachments span:hover a.icon-download {visibility: visible;}
+table.list td.tick {width:15%}
+table.list td.checkbox { width: 15px; padding: 2px 0 0 0; }
+table.list .checkbox input {padding:0px; height: initial;}
+table.list td.buttons, div.buttons { white-space:nowrap; text-align: right; }
+table.list td.buttons a, div.buttons a, table.list td.buttons span.icon-only { margin-right: 0.6em; }
+table.list td.buttons a:last-child, div.buttons a:last-child { margin-right: 0; }
+table.list td.buttons img, div.buttons img {vertical-align:middle;}
+table.list td.reorder {width:15%; white-space:nowrap; text-align:center; }
+table.list table.progress td {padding-right:0; border-top: none;}
+table.list caption { text-align: left; padding: 0.5em 0.5em 0.5em 0; }
+table.list tr.overdue td.due_date  { color: #c22; }
+table.list thead.related-issues th { background-color: inherit; font-size: 11px; border: none; }
+#role-permissions-trackers table.list th {white-space:normal;}
+table.list div.wiki p {
+  margin: 0;
+}
+
+.table-list-cell {display: table-cell; vertical-align: top; padding:2px; }
+.table-list div.buttons {width: 15%;}
+
+tr.project td.name a { white-space:nowrap; }
+tr.project.closed, tr.project.archived { color: #aaa; }
+tr.project.closed a, tr.project.archived a { color: #aaa; }
+
+tr.issue { text-align: center; white-space: nowrap; }
+tr.issue td.subject, tr.issue td.parent-subject, tr.issue td.category, td.assigned_to, td.last_updated_by, tr.issue td.string, tr.issue td.text, tr.issue td.list, tr.issue td.relations, tr.issue td.parent, tr.issue td.watcher_users { white-space: normal; }
+tr.issue td.relations { text-align: left; }
+tr.issue td.done_ratio table.progress { margin-left:auto; margin-right: auto;}
+tr.issue td.relations span, tr.issue td.watcher_users a {white-space: nowrap;}
+tr.issue td.watcher_users ul {list-style: none; padding: 0; margin: 0}
+tr.issue.created-by-me td.author {font-weight: bold;}
+tr.issue.assigned-to-me td.assigned_to {font-weight: bold;}
+tr.issue.assigned-to-my-group td.assigned_to {font-weight: bold;}
+table.issues td.block_column {color:#777; font-size:90%; padding:4px 4px 4px 24px; text-align:left; white-space:normal;}
+table.issues td.block_column>span {font-weight: bold; display: block; margin-bottom: 4px;}
+table.issues td.block_column>pre {white-space:normal;}
+
+tr.idnt td.subject, tr.idnt td.name {background: url(/chevron-right-idnt.svg) no-repeat 2px 50%;}
+tr.idnt-1 td.subject, tr.idnt-1 td.name {padding-left: 24px; background-position: 4px 50%;}
+tr.idnt-2 td.subject, tr.idnt-2 td.name {padding-left: 40px; background-position: 20px 50%;}
+tr.idnt-3 td.subject, tr.idnt-3 td.name {padding-left: 56px; background-position: 36px 50%;}
+tr.idnt-4 td.subject, tr.idnt-4 td.name {padding-left: 72px; background-position: 52px 50%;}
+tr.idnt-5 td.subject, tr.idnt-5 td.name {padding-left: 88px; background-position: 68px 50%;}
+tr.idnt-6 td.subject, tr.idnt-6 td.name {padding-left: 104px; background-position: 84px 50%;}
+tr.idnt-7 td.subject, tr.idnt-7 td.name {padding-left: 120px; background-position: 100px 50%;}
+tr.idnt-8 td.subject, tr.idnt-8 td.name {padding-left: 136px; background-position: 116px 50%;}
+tr.idnt-9 td.subject, tr.idnt-9 td.name {padding-left: 152px; background-position: 132px 50%;}
+
+table.issue-report {table-layout:fixed;}
+table.issue-report tr.total, table.issue-report-detailed tr.total { font-weight: bold; border-top:2px solid #d0d7de;}
+.issue-report-graph {width: 75%; margin: 2em 0;}
+
+tr.entry td { white-space: nowrap; }
+tr.entry td.filename {width:30%; text-align:left;}
+tr.entry td.filename_no_report {width:70%; text-align:left;}
+tr.entry td.size { text-align: right; font-size: 90%; }
+tr.entry td.revision, tr.entry td.author { text-align: center; }
+tr.entry td.age { text-align: right; }
+tr.entry.file td.filename a { margin-left: 26px; }
+tr.entry.file td.filename_no_report a { margin-left: 16px; }
+
+tr span.expander, .gantt_subjects div > span.expander {margin-left: 0; cursor: pointer;}
+.gantt_subjects .avatar {margin-right: 4px;}
+.gantt_subjects div.project-name a, .gantt_subjects div.version-name a {margin-left: 4px;}
+
+tr.changeset { height: 20px }
+tr.changeset ul, ol { margin-top: 0px; margin-bottom: 0px; }
+tr.changeset td.revision_graph { width: 15%; background-color: #fffffb; }
+tr.changeset td.author { text-align: center; width: 15%; white-space:nowrap;}
+tr.changeset td.committed_on { text-align: center; width: 15%; white-space:nowrap;}
+
+table.files tbody th {text-align:left;}
+table.files tr.file td.filename { text-align: left; }
+table.files tr.file td.digest { font-size: 86%; }
+
+table.members td.roles, table.memberships td.roles { width: 45%; }
+table.members td.buttons { text-align: left; width: 1px; white-space: nowrap;}
+
+table.messages td.last_message {text-align:left;}
+tr.message { height: 2.6em; }
+tr.message td.created_on { white-space: nowrap; }
+tr.message td.last_message { font-size: 93%; white-space: nowrap; }
+tr.message.sticky td.subject { font-weight: bold; }
+tr.message td.subject:not(:has(.icon)) { padding-left: 20px; }
+
+tr.version.closed, tr.version.closed a { color: #999; }
+tr.version:not(.shared) td.name { padding-left: 20px; }
+tr.version td.date, tr.version td.status, tr.version td.sharing { text-align: center; white-space:nowrap; }
+
+#principals_for_new_member .icon-user, #users_for_watcher .icon-user {background:transparent;}
+#principals_for_new_member svg, #principals_for_new_member .avatar  {margin-right: 4px;}
+
+tr.user td {width:13%;white-space: nowrap;}
+td.username, td.firstname, td.lastname, td.email {text-align:left !important;}
+tr.user td.email { width:18%; }
+tr.user.locked, tr.user.registered { color: #aaa; }
+tr.user.locked a, tr.user.registered a { color: #aaa; }
+
+table.permissions td.role {color:#999;font-size:90%;font-weight:normal !important;text-align:center;vertical-align:bottom;}
+table.permissions tr.group>td:nth-of-type(1),
+table.tracker-summary tr.group>td:nth-of-type(1) {font-weight: bold;}
+
+tr.wiki-page-version td.updated_on, tr.wiki-page-version td.author {text-align:center;}
+
+tr.time-entry { text-align: center; white-space: nowrap; }
+tr.time-entry td.issue, tr.time-entry td.comments, tr.time-entry td.subject, tr.time-entry td.activity, tr.time-entry td.project { text-align: left; white-space: normal; }
+table.time-entries td.hours { text-align: right; font-weight: bold; padding-right: 0.5em; }
+table.time-entries td.hours .hours-dec { font-size: 0.9em; }
+
+table.plugins td { vertical-align: middle; }
+table.plugins td.configure { text-align: right; padding-right: 1em; }
+table.plugins span.name { font-weight: bold; display: block; margin-bottom: 6px; }
+table.plugins span.description { display: block; font-size: 0.9em; }
+table.plugins span.url { display: block; font-size: 0.9em; }
+
+table.list.enumerations {table-layout: fixed; margin-bottom: 2em;}
+
+tr.group td { padding: 0.8em 0 0.5em 0.3em; border-bottom: 2px solid #d0d7de; text-align:left; background-color: #fff;}
+tr.group span.count {top:-1px;}
+tr.group span.name {font-weight:bold;}
+tr.group span.totals {color: #aaa; font-size: 93%;}
+tr.group span.totals .value {font-weight:bold; color:#777;}
+tr.group a.toggle-all { color: #aaa; font-size: 93%; display:none; float:right; margin-right:4px;}
+tr.group:hover a.toggle-all { display:inline;}
+a.toggle-all:hover {text-decoration:none;}
+
+table.list tbody tr.group:hover { background-color:inherit; }
+
+table td {padding:2px;}
+table p {margin:0;}
+
+table.list:not(.odd-even) tbody tr:nth-child(odd), .odd, #issue-changesets div.changeset:nth-child(odd) { background-color: #fff; }
+table.list:not(.odd-even) tbody tr:nth-child(even), .even, #issue-changesets div.changeset:nth-child(even) { background-color: #f6f7f8; }
+table.list:not(.odd-even) tbody tr:nth-child(odd):hover, .odd:hover, #issue-changesets div.changeset:nth-child(odd):hover,
+table.list:not(.odd-even) tbody tr:nth-child(even):hover, .even:hover, #issue-changesets div.changeset:nth-child(even):hover { background-color:#ffffdd; }
+
+tr.builtin td.name {font-style:italic;}
+
+a.sort { padding-right: 16px; background-position: 100% 50%; background-repeat: no-repeat; }
+
+table.boards td.last-message {text-align:left;font-size:93%;}
+
+div.table-list.boards .table-list-cell.name {width: 30%;}
+#message_subject { max-width: 99%; }
+
+#query_form_content {font-size:90%;}
+#query_form_with_buttons > p.contextual {font-size:0.75rem; margin:12px 0px;}
+
+.query_sort_criteria_count {
+  display: inline-block;
+  min-width: 1em;
+}
+
+/* query form - options */
+#list-definition {
+  margin: 0 15px;
+  width: auto !important;
+}
+#list-definition > div {
+  margin: 6px 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 10px;
+}
+#list-definition > div .field{
+  width: 160px;
+}
+.query-columns label {
+  display:block;
+}
+#list-definition .buttons input[type=button] {
+  width:35px;
+  display:block;
+}
+.query-columns select {
+  min-width:150px;
+}
+
+.query-totals {text-align:right; margin-top:-2.3em; font-size: 93%;}
+.query-totals>span:not(:first-child) {margin-left:0.6em;}
+.query-totals .value {font-weight:bold;}
+body.controller-timelog .query-totals {margin-top:initial;}
+
+body.controller-gantts fieldset#options > div > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 5px 10px;
+}
+
+td.center {text-align:center;}
+
+#watchers select {width: 95%; display: block;}
+#watchers .avatar {margin: 0 4px 2px 0;}
+#watchers svg.icon-svg {margin: 0 2px 2px 0;}
+#users_for_watcher .avatar {padding-bottom: 2px; margin-right: 4px;}
+#users_for_watcher svg {margin-right: 4px;}
+#users_for_watcher span.icon-user {display: inline;}
+
+span#watchers_inputs {overflow:auto; display:block;}
+span.search_for_watchers {display:block;}
+span.search_for_watchers, span.add_attachment {font-size:93%; line-height:2.5em;}
+span.add_attachment a {padding-left:16px; background: url(/bullet_add.png) no-repeat 0 50%; }
+
+input:disabled, select:disabled, textarea:disabled {
+  cursor: not-allowed;
+  color: graytext;
+  background-color: #ebebe4;
+}
+
+
+.highlight { background-color: #FCFD8D;}
+.highlight.token-1 { background-color: #faa;}
+.highlight.token-2 { background-color: #afa;}
+.highlight.token-3 { background-color: #aaf;}
+
+.box{
+  padding: 8px;
+  margin-bottom: 12px;
+  background-color: #f9fafb;
+  color: #505050;
+  line-height: 1.5em;
+  border: 1px solid #d0d7de;
+  word-wrap: break-word;
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+div.square {
+  border: 1px solid #999;
+  float: left;
+  margin: .3em .4em 0 .4em;
+  overflow: hidden;
+  width: .6em; height: .6em;
+}
+.contextual {float:right; white-space: nowrap; line-height:1.4em;margin:5px 0px; padding-left: 10px; font-size:0.9em;}
+.contextual input, .contextual select {font-size:0.9em;}
+
+.splitcontent {overflow: auto; display: flex; flex-wrap: wrap;}
+.splitcontentleft {flex: 1; margin-right: 5px;}
+.splitcontentright {flex: 1; margin-left: 5px;}
+.splitcontenttop {flex: 2; flex-basis: 100%;}
+
+form {display: inline;}
+input, select, button {vertical-align: middle; margin-top: 1px; margin-bottom: 1px; height: 24px; padding: 0 7px;}
+input, select, textarea, button { color: #333; background-color: #fff; border:1px solid #ccc; border-radius:3px; box-sizing: border-box;}
+select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  -o-appearance: none;
+  appearance: none;
+  background-color: #fff;
+  background-image: url(/chevron-down.svg);
+  background-repeat: no-repeat;
+  background-position: calc(100% - 2px) 50%;
+  padding-right: 20px;
+}
+input[type="file"] {border: 0; padding-left: 0; padding-right: 0; height: initial; background-color: initial; }
+input[type="submit"], button[type="submit"] {
+  -webkit-appearance: button;
+  cursor: pointer;
+  background-color: #fff;
+  height: 28px;
+  -webkit-transition: background-color 100ms linear;
+  -moz-transition: background-color 100ms linear;
+  -o-transition: background-color 100ms linear;
+  transition: background-color 100ms linear;
+}
+input[type="submit"]:hover, button[type="submit"]:hover {
+  background-color: #ddd;
+}
+
+input[type="text"]:focus, input[type="text"]:active,
+input[type="password"]:focus, input[type="password"]:active,
+input[type="date"]:focus, input[type="date"]:active,
+input[type="number"]:focus, input[type="number"]:active,
+select:focus, select:active,
+textarea:focus, textarea:active {
+  border: 1px solid #5ad;
+  outline: none;
+}
+
+input:placeholder-shown {
+  text-overflow: ellipsis;
+}
+
+select[multiple=multiple] {background: #fff; padding-right: initial; height: auto;}
+fieldset {border: 1px solid #d0d7de; margin:0; min-width: inherit;}
+legend {color: #333;}
+hr { width: 100%; height: 1px; background: #ccc; border: 0;}
+blockquote { font-style: italic; border-left: 3px solid #e0e0e0; padding-left: 0.6em; margin-left: 0;}
+blockquote blockquote { margin-left: 0;}
+abbr, span.field-description[title] { border-bottom: 1px dotted #aaa; cursor: help; }
+textarea.wiki-edit {width:99%; resize:vertical; box-sizing: border-box;}
+body.textarea-monospace textarea.wiki-edit {font-family: Consolas, Menlo, "Liberation Mono", Courier, monospace;}
+body.textarea-proportional textarea.wiki-edit {font-family: var(--fonts-main);}
+li p {margin-top: 0;}
+div.issue {
+  background: #ffffdd;
+  padding: 8px;
+  margin-bottom: 6px;
+  border: 1px solid #d0d7de;
+  border-radius: 3px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+p.breadcrumb { font-size: 0.8125rem; margin: 4px 0 4px 0;}
+p.subtitle { font-size: 0.8125rem; margin: -6px 0 12px 0; font-style: italic; }
+p.footnote { font-size: 0.9em; margin-top: 0px; margin-bottom: 0px; }
+.wiki-class-ltr {direction:ltr !important;}
+.wiki-class-rtl {direction:rtl !important;}
+
+div.issue div.subject div div { padding-left: 16px; word-break: break-word; }
+div.issue div.subject p {margin: 0; margin-bottom: 0.1em; font-size: 90%; color: #999;}
+div.issue div.subject>div>p { margin-top: 0.5em; }
+div.issue div.subject h3 {margin: 0; margin-bottom: 0.1em;}
+div.issue p.author {margin-top:0.5em; font-size: 93%}
+div.issue span.private, div.journal span.private {font-size: 60%;}
+div.issue .next-prev-links {color:#999;}
+div.issue .attributes {margin-top: 2em;}
+div.issue .attributes .attribute {padding-left:180px; clear:left; min-height: 1.8em;}
+div.issue .attributes .attribute .label {width: 170px; margin-left:-180px; font-weight:bold; float:left;  overflow: clip visible; text-overflow: ellipsis;}
+div.issue .attribute .value {overflow:auto; text-overflow: ellipsis;}
+div.issue .attribute.string_cf .value .wiki p {margin-top: 0; margin-bottom: 0;}
+div.issue .attribute.text_cf .value .wiki p:first-of-type {margin-top: 0;}
+div.issue.overdue .due-date .value { color: #c22; }
+body.controller-issues h2.inline-flex {padding-right: 0}
+div#sticky-issue-header {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background-color: white;
+  border-bottom: 1px solid #d0d7de;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  font-size: 0.8125rem;
+  align-items: center;
+  z-index: 1000;
+  padding: 10px 6px;
+  border-radius: 0px;
+}
+div#sticky-issue-header.is-visible {
+  display: flex;
+}
+div#sticky-issue-header .issue-heading {
+  flex-shrink: 0;
+  white-space: nowrap;
+  margin-right: 6px;
+}
+div#sticky-issue-header .subject {
+  font-weight: bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-grow: 1;
+}
+
+#issue_tree table.issues, #relations table.issues {border: 0;}
+#issue_tree table.issues td, #relations table.issues td {border: 0;}
+#issue_tree td.checkbox, #relations td.checkbox {display:none;}
+#issue_tree td.buttons, #relations td.buttons {padding:0;}
+#issue_tree .issues-stat, #relations .issues-stat {font-size: 93%}
+#issue_tree .issues-stat .badge, #relations .issues-stat .badge {bottom: initial;}
+#issue_tree .issue > td, #relations .issue > td, #issue_tree .issue .user {
+  text-overflow: ellipsis; /* if text exceeds its space, add ... */
+  overflow: hidden;
+}
+#issue_tree .issue > td.subject, #relations .issue > td.subject {
+  width: 50%;
+  word-break: break-word; /* break word if subject is too long */
+  padding-right: 25px; /* this is the spaces that .buttons uses next to subject */
+}
+#issue_tree .issue > td.assigned_to, #relations .issue > td.assigned_to {
+  white-space: nowrap;
+}
+#trackers_description, #issue_statuses_description {display:none;}
+#trackers_description dt, #issue_statuses_description dt {font-weight: bold; text-decoration: underline;}
+#trackers_description dd, #issue_statuses_description dd {margin: 0; padding: 0 0 1em 0;}
+
+#issue-form .assign-to-me-link { padding-left: 5px; }
+
+fieldset.collapsible {border-width: 1px 0 0 0;}
+fieldset.collapsible>legend { cursor:pointer;}
+fieldset.collapsible>legend:not(:has(svg)) {padding-left: 18px; background-position: 4px;}
+fieldset#date-range p { margin: 2px 0 2px 0; }
+
+#query_form_content > fieldset {
+  min-width: 0;
+  max-width: 100%;
+}
+#filters-table {
+  float:left;
+  width: auto;
+}
+#filters-table .field {
+  width: 230px;
+}
+#filters-table .filter {
+  margin: 5px 0 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 10px;
+}
+#filters-table .filter .operator select {
+  width: 120px;
+}
+
+.add-filter {width:35%; float:right; text-align: right; vertical-align: top;}
+
+#issue_is_private_wrap {float:right; margin-right:1em;}
+.toggle-multiselect { margin-right:5px; cursor:pointer;}
+.buttons { font-size: 0.9em; margin-bottom: 1.4em; margin-top: 1em; }
+
+div#issue-changesets {float:right; width:45%; margin-left: 1em; margin-bottom: 1em; background: #fff; padding-left: 1em; font-size: 90%;}
+div#issue-changesets div.changeset {border-bottom: 1px solid #ddd; padding: 4px;}
+div#issue-changesets p { margin-top: 0; margin-bottom: 1em;}
+.changeset-comments {margin-bottom:1em;}
+
+#update {margin-bottom: 1.4em;}
+
+#history p.nodata {display: none;}
+/* Prevent content from being hidden behind a #sticky-issue-header when scrolling via anchor links. */
+.controller-issues.action-show div.wiki a[name],
+.controller-issues.action-show #history div[id^="note-"],
+.controller-issues.action-show #history div[id^="change-"],
+.controller-issues.action-show #update {
+  scroll-margin-top: 50px;
+}
+
+div#activity dl, #search-results { margin-left: 2em; }
+div#activity dd, #search-results dd { margin-bottom: 1em; padding-left: 22px; font-size: 0.8125rem;}
+div#activity dt svg.icon-svg {margin-right: 4px;}
+div#activity dt.me .time { border-bottom: 1px solid
