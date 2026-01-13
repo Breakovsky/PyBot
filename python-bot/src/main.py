@@ -11,7 +11,9 @@ from sqlalchemy import select, update
 # Core imports
 from src.core.database import async_session, TelegramTopic, UserRole, TelegramUser, Employee
 from src.core.middlewares import RoleMiddleware
+from src.core.topic_filter import require_topic, is_in_topic
 from src.handlers.asset_search import handle_asset_search
+from src.handlers.diagnostics import handle_test_command, set_bot_start_time
 
 # Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -41,10 +43,19 @@ async def get_topic_id(session, topic_name):
 # --- Handlers ---
 
 @dp.message(Command("start"))
-async def cmd_start(message: Message):
-    async with async_session() as session:
-        # User is auto-created by middleware
-        await message.answer("NetAdmin v3.0 (RBAC Enabled). Access Level: Verified.")
+async def cmd_start(message: Message, user: TelegramUser):
+    """Welcome message with user info"""
+    await message.answer(
+        f"NetAdmin v3.0 (RBAC Enabled)\n"
+        f"Welcome, {user.username or 'User'}!\n"
+        f"Your Role: {user.role.value}\n\n"
+        f"Use /test to check system status"
+    )
+
+@dp.message(Command("test"))
+async def cmd_test(message: Message, user: TelegramUser):
+    """System diagnostics command"""
+    await handle_test_command(message, user, redis_client)
 
 @dp.message(Command("admin"), flags={"role": UserRole.SENIOR_ADMIN})
 async def cmd_admin(message: Message, user: TelegramUser):
@@ -80,21 +91,36 @@ async def cmd_set_topic(message: Message):
 
 @dp.message(F.text.regexp(r"^[Ww][Ss][-\s]?\d+$")) # Workstation Pattern: WS-123, ws123, WS 123
 async def handle_workstation_query(message: Message):
-    """Handle workstation queries like WS-101"""
+    """Handle workstation queries like WS-101 - ONLY in #assets topic"""
+    # Topic isolation: Only allow in assets topic
+    if not await is_in_topic(message, "assets"):
+        logger.debug(f"🚫 Workstation query blocked: not in #assets topic")
+        return
+    
     query = message.text.strip()
     logger.info(f"🔍 Workstation query from {message.from_user.username} ({message.from_user.id}): '{query}'")
     await handle_asset_search(message, query)
 
 @dp.message(F.text.regexp(r"^\d{3,}$")) # Phone Pattern: 1234 or longer
 async def handle_phone_query(message: Message):
-    """Handle phone number queries"""
+    """Handle phone number queries - ONLY in #assets topic"""
+    # Topic isolation: Only allow in assets topic
+    if not await is_in_topic(message, "assets"):
+        logger.debug(f"🚫 Phone query blocked: not in #assets topic")
+        return
+    
     query = message.text.strip()
     logger.info(f"📞 Phone query from {message.from_user.username} ({message.from_user.id}): '{query}'")
     await handle_asset_search(message, query)
 
 @dp.message(Command("search"))
 async def cmd_search(message: Message):
-    """Generic search command: /search <query>"""
+    """Generic search command: /search <query> - ONLY in #assets topic"""
+    # Topic isolation: Only allow in assets topic
+    if not await is_in_topic(message, "assets"):
+        await message.reply("❌ Asset search is only available in #assets topic.")
+        return
+    
     args = message.text.split(maxsplit=1)
     if len(args) < 2:
         await message.reply("❌ Usage: /search <WS number / phone / name>")
@@ -220,6 +246,9 @@ async def redis_listener():
 
 async def main():
     """Main entry point."""
+    # Set bot startup time for uptime calculation
+    set_bot_start_time()
+    
     # Start Redis Listener as background task
     redis_task = asyncio.create_task(redis_listener())
     
