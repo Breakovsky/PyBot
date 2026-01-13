@@ -110,8 +110,8 @@ def format_employee_card(employee: Employee) -> str:
         lines.append(f"<b>🖥 WorkStation:</b> <code>{employee.workstation}</code>")
     
     # Phone
-    if employee.phone:
-        lines.append(f"<b>📞 Телефон:</b> <code>{employee.phone}</code>")
+    if employee.internal_phone:
+        lines.append(f"<b>📞 Телефон:</b> <code>{employee.internal_phone}</code>")
     
     # AD Login
     if employee.ad_login:

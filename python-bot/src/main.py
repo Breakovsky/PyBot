@@ -172,77 +172,143 @@ async def handle_unhandled_message(message: Message):
         )
 
 # --- Background Worker (Redis Listener) ---
+
+# Exponential backoff configuration
+REDIS_RECONNECT_BASE_DELAY = 1  # seconds
+REDIS_RECONNECT_MAX_DELAY = 60  # seconds
+REDIS_HEALTH_CHECK_INTERVAL = 30  # seconds
+
+
 async def redis_listener():
     """
     Redis Pub/Sub listener for alerts from Java Agent.
-    Format: "TOPIC_NAME|MESSAGE"
+    
+    Features:
+    - Exponential backoff on connection failures
+    - Periodic health checks
+    - Graceful error handling
+    
+    Message Format: "TOPIC_NAME|MESSAGE"
     """
+    reconnect_delay = REDIS_RECONNECT_BASE_DELAY
+    consecutive_failures = 0
+    
     while True:
+        pubsub = None
         try:
+            # Test connection first
+            await redis_client.ping()
+            logger.info("✅ Redis connection established")
+            
             pubsub = redis_client.pubsub()
             await pubsub.subscribe("bot_alerts", "netadmin_tasks")
             
             logger.info("🎧 Redis Listener Active - Subscribed to: bot_alerts, netadmin_tasks")
             
+            # Reset backoff on successful connection
+            reconnect_delay = REDIS_RECONNECT_BASE_DELAY
+            consecutive_failures = 0
+            
+            # Listen with timeout for health checks
+            last_health_check = asyncio.get_event_loop().time()
+            
             async for message in pubsub.listen():
+                # Periodic health check
+                current_time = asyncio.get_event_loop().time()
+                if current_time - last_health_check > REDIS_HEALTH_CHECK_INTERVAL:
+                    try:
+                        await redis_client.ping()
+                        last_health_check = current_time
+                    except Exception as ping_error:
+                        logger.warning(f"Redis health check failed: {ping_error}")
+                        break  # Exit loop to reconnect
+                
                 if message['type'] != 'message':
                     continue
                     
                 channel = message['channel']
                 data = message['data']
                 
-                logger.debug(f"📨 Received message on {channel}: {data[:100]}...")
+                logger.debug(f"📨 Received message on {channel}: {data[:100] if data else 'empty'}...")
                 
                 if channel == "bot_alerts":
-                    # Format: "TOPIC_NAME|MESSAGE"
-                    try:
-                        if "|" not in data:
-                            logger.warning(f"Invalid alert format (missing |): {data}")
-                            continue
-                        
-                        topic_name, text = data.split("|", 1)
-                        topic_name = topic_name.strip()
-                        
-                        logger.info(f"🚨 Alert for topic '{topic_name}': {text[:50]}...")
-                        
-                        async with async_session() as session:
-                            thread_id = await get_topic_id(session, topic_name)
-                            
-                            chat_id = os.getenv("TELEGRAM_SUPERGROUP_ID")
-                            
-                            if not chat_id:
-                                logger.error("❌ TELEGRAM_SUPERGROUP_ID not set - cannot send alert")
-                                continue
-                            
-                            # Send to Telegram
-                            try:
-                                await bot.send_message(
-                                    chat_id=chat_id, 
-                                    text=text, 
-                                    message_thread_id=thread_id,
-                                    parse_mode="HTML"
-                                )
-                                logger.info(f"✅ Alert sent to topic '{topic_name}' (thread_id={thread_id})")
-                            except Exception as send_error:
-                                logger.error(f"Failed to send Telegram message: {send_error}")
-                                # Fallback: Send to general chat without topic
-                                try:
-                                    await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
-                                    logger.info("✅ Alert sent to general chat (fallback)")
-                                except Exception as fallback_error:
-                                    logger.error(f"Fallback send also failed: {fallback_error}")
-                    
-                    except Exception as e:
-                        logger.error(f"❌ Alert processing error: {e}", exc_info=True)
+                    await process_alert(data)
                 
                 elif channel == "netadmin_tasks":
-                    # Handle other task types if needed
-                    logger.info(f"📋 Task received: {data[:100]}...")
+                    logger.info(f"📋 Task received: {data[:100] if data else 'empty'}...")
+        
+        except asyncio.CancelledError:
+            logger.info("🛑 Redis listener cancelled")
+            raise
         
         except Exception as e:
-            logger.error(f"❌ Redis Listener error: {e}", exc_info=True)
-            logger.info("🔄 Reconnecting in 5 seconds...")
-            await asyncio.sleep(5)
+            consecutive_failures += 1
+            logger.error(f"❌ Redis Listener error (attempt {consecutive_failures}): {e}")
+            
+            # Exponential backoff with max limit
+            reconnect_delay = min(
+                REDIS_RECONNECT_BASE_DELAY * (2 ** consecutive_failures),
+                REDIS_RECONNECT_MAX_DELAY
+            )
+            logger.info(f"🔄 Reconnecting in {reconnect_delay} seconds...")
+            await asyncio.sleep(reconnect_delay)
+        
+        finally:
+            # Clean up pubsub connection
+            if pubsub:
+                try:
+                    await pubsub.unsubscribe()
+                    await pubsub.close()
+                except Exception:
+                    pass
+
+
+async def process_alert(data: str):
+    """Process an alert message from Redis."""
+    try:
+        if not data or "|" not in data:
+            logger.warning(f"Invalid alert format (missing |): {data}")
+            return
+        
+        topic_name, text = data.split("|", 1)
+        topic_name = topic_name.strip()
+        
+        logger.info(f"🚨 Alert for topic '{topic_name}': {text[:50]}...")
+        
+        async with async_session() as session:
+            thread_id = await get_topic_id(session, topic_name)
+            
+            chat_id = os.getenv("TELEGRAM_SUPERGROUP_ID")
+            
+            if not chat_id:
+                logger.error("❌ TELEGRAM_SUPERGROUP_ID not set - cannot send alert")
+                return
+            
+            # Send to Telegram with retry
+            for attempt in range(3):
+                try:
+                    await bot.send_message(
+                        chat_id=chat_id, 
+                        text=text, 
+                        message_thread_id=thread_id,
+                        parse_mode="HTML"
+                    )
+                    logger.info(f"✅ Alert sent to topic '{topic_name}' (thread_id={thread_id})")
+                    return
+                except Exception as send_error:
+                    logger.warning(f"Send attempt {attempt + 1} failed: {send_error}")
+                    if attempt < 2:
+                        await asyncio.sleep(1)
+            
+            # Fallback: Send to general chat without topic
+            try:
+                await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+                logger.info("✅ Alert sent to general chat (fallback)")
+            except Exception as fallback_error:
+                logger.error(f"Fallback send also failed: {fallback_error}")
+    
+    except Exception as e:
+        logger.error(f"❌ Alert processing error: {e}", exc_info=True)
 
 async def main():
     """Main entry point."""

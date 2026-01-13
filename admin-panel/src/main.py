@@ -1,14 +1,33 @@
+"""
+NetAdmin Control Plane - Admin Panel
+=====================================
+FastAPI-based admin interface for infrastructure management.
+
+Security Features:
+- JWT-like token authentication (signed cookies)
+- CSRF protection via SameSite cookies
+- Input validation via Pydantic models
+- SQL injection prevention via parameterized queries
+- XSS prevention via Jinja2 auto-escaping
+"""
+
 import os
 import logging
+import secrets
+import hashlib
+import hmac
+from datetime import datetime, timedelta
+from typing import List, Optional, Literal
+from contextlib import asynccontextmanager
+from functools import wraps
+
 import docker
 import redis
-import asyncio
-from typing import List, Optional
-from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request, Form, Depends, HTTPException, status
+from fastapi import FastAPI, Request, Form, Depends, HTTPException, status, Query
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field, validator, EmailStr
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, func, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -17,31 +36,107 @@ from sqlalchemy.orm import sessionmaker, Session
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Database Configuration
 POSTGRES_USER = os.getenv("POSTGRES_USER", "netadmin")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "netadmin_secret")
 POSTGRES_DB = os.getenv("POSTGRES_DB", "netadmin_db")
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "db")
 DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}/{POSTGRES_DB}"
 
+# Redis Configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin")  # Simple MVP Auth
+# Security Configuration
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+if not ADMIN_PASSWORD or ADMIN_PASSWORD == "admin":
+    logger.warning("⚠️ ADMIN_PASSWORD not set or using default! Set a strong password in production.")
+    ADMIN_PASSWORD = ADMIN_PASSWORD or "admin"
 
-# --- Database ---
-engine = create_engine(DATABASE_URL)
+# Secret key for signing tokens (generate if not provided)
+SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", secrets.token_hex(32))
+TOKEN_EXPIRY_HOURS = 24
+
+# --- Pydantic Models (Request/Response Validation) ---
+
+class EmployeeCreate(BaseModel):
+    """Validated employee creation request."""
+    full_name: str = Field(..., min_length=2, max_length=255)
+    company: Optional[str] = Field(None, max_length=100)
+    department: Optional[str] = Field(None, max_length=255)
+    location: Optional[str] = Field(None, max_length=255)
+    internal_phone: Optional[str] = Field(None, max_length=50)
+    phone_type: Literal['TA', 'MicroSIP', 'NONE'] = 'NONE'
+    workstation: Optional[str] = Field(None, max_length=100)
+    device_type: Optional[Literal['PC', 'Laptop', 'Monoblock', 'Server', 'Other']] = None
+    specs_cpu: Optional[str] = Field(None, max_length=255)
+    specs_gpu: Optional[str] = Field(None, max_length=255)
+    specs_ram: Optional[str] = Field(None, max_length=50)
+    monitor: Optional[str] = Field(None, max_length=255)
+    ups: Optional[str] = Field(None, max_length=255)
+    ad_login: Optional[str] = Field(None, max_length=100)
+    email: Optional[str] = Field(None, max_length=255)
+    has_ad: bool = False
+    has_drweb: bool = False
+    has_zabbix: bool = False
+    notes: Optional[str] = None
+
+    @validator('email')
+    def validate_email(cls, v):
+        if v and '@' not in v:
+            raise ValueError('Invalid email format')
+        return v
+
+
+class EmployeeUpdate(BaseModel):
+    """Validated employee update request (partial)."""
+    full_name: Optional[str] = Field(None, min_length=2, max_length=255)
+    department: Optional[str] = Field(None, max_length=255)
+    internal_phone: Optional[str] = Field(None, max_length=50)
+    workstation: Optional[str] = Field(None, max_length=100)
+    ad_login: Optional[str] = Field(None, max_length=100)
+    email: Optional[str] = Field(None, max_length=255)
+    notes: Optional[str] = None
+
+
+class TargetCreate(BaseModel):
+    """Validated monitoring target creation."""
+    name: str = Field(..., min_length=1, max_length=100)
+    hostname: str = Field(..., min_length=1, max_length=255)
+    interval: int = Field(..., ge=10, le=3600)  # 10s to 1h
+
+
+class SortColumn:
+    """Whitelist for sortable columns - prevents SQL injection via getattr."""
+    ALLOWED_COLUMNS = frozenset({
+        'id', 'last_name', 'first_name', 'company', 'department', 
+        'location', 'workstation', 'internal_phone', 'email', 'ad_login'
+    })
+    
+    @classmethod
+    def validate(cls, column: Optional[str]) -> Optional[str]:
+        """Validate column name against whitelist."""
+        if column and column in cls.ALLOWED_COLUMNS:
+            return column
+        return None
+
+
+# --- Database Setup ---
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
 
 class MonitoredTarget(Base):
     __tablename__ = "monitored_targets"
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, index=True)
-    hostname = Column(String)
+    name = Column(String(100), index=True)
+    hostname = Column(String(255))
     interval_seconds = Column(Integer, default=60)
     is_active = Column(Boolean, default=True)
-    last_status = Column(String, nullable=True)
+    last_status = Column(String(20), nullable=True)
     last_check = Column(DateTime(timezone=True), nullable=True)
+
 
 class Employee(Base):
     __tablename__ = "employees"
@@ -52,18 +147,17 @@ class Employee(Base):
     last_name = Column(String(100), index=True)
     first_name = Column(String(100), index=True)
     middle_name = Column(String(100), index=True)
-    # full_name is a GENERATED column in PostgreSQL, accessible as property
     department = Column(String(255), index=True)
     location = Column(String(255), index=True)
     
     # Contact Information
     email = Column(String(255), index=True)
-    phone_type = Column(String(20))  # 'TA', 'MicroSIP', 'NONE'
+    phone_type = Column(String(20))
     internal_phone = Column(String(50), index=True)
     
     # Hardware Inventory
     workstation = Column(String(100), index=True)
-    device_type = Column(String(50))  # 'PC', 'Laptop', 'Monoblock', 'Server', 'Other'
+    device_type = Column(String(50))
     specs_cpu = Column(String(255))
     specs_gpu = Column(String(255))
     specs_ram = Column(String(50))
@@ -84,39 +178,114 @@ class Employee(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     @property
-    def full_name(self):
+    def full_name(self) -> Optional[str]:
         """Construct full name from parts."""
         parts = [self.last_name or "", self.first_name or "", self.middle_name or ""]
         return " ".join(p for p in parts if p).strip() or None
 
-# Create tables (MVP approach - usually use migration tool)
-Base.metadata.create_all(bind=engine)
+
+# Note: In production, use Alembic migrations instead of create_all()
+# Base.metadata.create_all(bind=engine)
+
 
 def get_db():
+    """Database session dependency."""
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-# --- Docker & Redis ---
+
+# --- Security Utilities ---
+
+def generate_token(user_id: str = "admin") -> str:
+    """Generate a signed authentication token."""
+    timestamp = int(datetime.utcnow().timestamp())
+    payload = f"{user_id}:{timestamp}"
+    signature = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}:{signature}"
+
+
+def verify_token(token: str) -> bool:
+    """Verify authentication token signature and expiry."""
+    if not token:
+        return False
+    
+    try:
+        parts = token.split(":")
+        if len(parts) != 3:
+            return False
+        
+        user_id, timestamp_str, signature = parts
+        timestamp = int(timestamp_str)
+        
+        # Check expiry
+        token_time = datetime.utcfromtimestamp(timestamp)
+        if datetime.utcnow() - token_time > timedelta(hours=TOKEN_EXPIRY_HOURS):
+            logger.warning("Token expired")
+            return False
+        
+        # Verify signature
+        payload = f"{user_id}:{timestamp_str}"
+        expected_signature = hmac.new(SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        
+        if not hmac.compare_digest(signature, expected_signature):
+            logger.warning("Invalid token signature")
+            return False
+        
+        return True
+    
+    except Exception as e:
+        logger.error(f"Token verification error: {e}")
+        return False
+
+
+def verify_password(provided: str, expected: str) -> bool:
+    """Constant-time password comparison."""
+    return hmac.compare_digest(provided.encode(), expected.encode())
+
+
+# --- Docker & Redis Clients ---
 docker_client = docker.from_env()
 redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
 
+
 # --- FastAPI App ---
 templates = Jinja2Templates(directory="src/templates")
-app = FastAPI(title="NetAdmin Control Plane")
+app = FastAPI(title="NetAdmin Control Plane", version="3.0.0")
 
-# Simple Auth Dependency
-def verify_auth(request: Request):
-    token = request.cookies.get("admin_token")
-    if token != "valid_token": # Extremely simple MVP token
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+
+# --- Auth Dependencies ---
+
+def get_auth_token(request: Request) -> Optional[str]:
+    """Extract auth token from cookie."""
+    return request.cookies.get("admin_token")
+
+
+def verify_auth(request: Request) -> bool:
+    """Verify authentication - raises HTTPException if invalid."""
+    token = get_auth_token(request)
+    if not verify_token(token):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated"
+        )
+    return True
+
+
+def verify_auth_soft(request: Request) -> bool:
+    """Verify authentication - returns False instead of raising."""
+    token = get_auth_token(request)
+    return verify_token(token)
+
+
+# --- Routes ---
 
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, db: Session = Depends(get_db)):
-    token = request.cookies.get("admin_token")
-    if token != "valid_token":
+    """Main dashboard page."""
+    if not verify_auth_soft(request):
         return templates.TemplateResponse("login.html", {"request": request})
     
     targets = db.query(MonitoredTarget).all()
@@ -125,7 +294,6 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
     containers = []
     try:
         for c in docker_client.containers.list(all=True):
-            # Filter only our stack if needed, or show all
             if "netadmin" in c.name or "redis" in c.name or "db" in c.name:
                 containers.append({
                     "id": c.short_id,
@@ -160,86 +328,167 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         "backups": backups
     })
 
+
 @app.post("/login")
 async def login(password: str = Form(...)):
-    if password == ADMIN_PASSWORD:
+    """Handle login form submission."""
+    if verify_password(password, ADMIN_PASSWORD):
         response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-        response.set_cookie(key="admin_token", value="valid_token")
+        token = generate_token()
+        response.set_cookie(
+            key="admin_token",
+            value=token,
+            httponly=True,
+            secure=os.getenv("HTTPS_ENABLED", "false").lower() == "true",
+            samesite="lax",
+            max_age=TOKEN_EXPIRY_HOURS * 3600
+        )
+        logger.info("Admin login successful")
         return response
-    return RedirectResponse(url="/?error=Invalid Password", status_code=status.HTTP_303_SEE_OTHER)
+    
+    logger.warning("Failed login attempt")
+    return RedirectResponse(url="/?error=Invalid+Password", status_code=status.HTTP_303_SEE_OTHER)
+
 
 @app.post("/logout")
 async def logout():
+    """Handle logout."""
     response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
     response.delete_cookie("admin_token")
     return response
 
+
 # --- Container Operations ---
+
 @app.post("/api/containers/{container_id}/restart")
-async def restart_container(container_id: str, _: None = Depends(verify_auth)):
+async def restart_container(container_id: str, _: bool = Depends(verify_auth)):
+    """Restart a Docker container."""
     try:
         container = docker_client.containers.get(container_id)
         container.restart()
+        logger.info(f"Container {container.name} restarted")
         return {"status": "success", "message": f"Container {container.name} restarting..."}
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Container not found")
     except Exception as e:
+        logger.error(f"Container restart error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/containers/{container_id}/logs")
-async def get_logs(container_id: str, _: None = Depends(verify_auth)):
+async def get_logs(container_id: str, _: bool = Depends(verify_auth)):
+    """Get container logs."""
     try:
         container = docker_client.containers.get(container_id)
-        # Get last 100 lines
-        logs = container.logs(tail=100).decode('utf-8')
+        logs = container.logs(tail=100).decode('utf-8', errors='replace')
         return {"logs": logs}
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Container not found")
     except Exception as e:
+        logger.error(f"Get logs error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
 # --- Target Operations ---
+
 @app.post("/api/targets")
 async def create_target(
     name: str = Form(...),
     hostname: str = Form(...),
     interval: int = Form(...),
     db: Session = Depends(get_db),
-    _: None = Depends(verify_auth)
+    _: bool = Depends(verify_auth)
 ):
-    target = MonitoredTarget(name=name, hostname=hostname, interval_seconds=interval)
+    """Create a new monitoring target."""
+    # Validate via Pydantic
+    try:
+        validated = TargetCreate(name=name, hostname=hostname, interval=interval)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    target = MonitoredTarget(
+        name=validated.name,
+        hostname=validated.hostname,
+        interval_seconds=validated.interval
+    )
     db.add(target)
     db.commit()
     
     # Notify Java Agent
-    redis_client.publish("netadmin_events", "CONFIG_UPDATE:MONITORING")
+    try:
+        redis_client.publish("netadmin_events", "CONFIG_UPDATE:MONITORING")
+    except Exception as e:
+        logger.error(f"Redis publish error: {e}")
     
+    logger.info(f"Created monitoring target: {validated.name}")
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
+
 @app.post("/api/targets/{target_id}/delete")
-async def delete_target(target_id: int, db: Session = Depends(get_db), _: None = Depends(verify_auth)):
-    db.query(MonitoredTarget).filter(MonitoredTarget.id == target_id).delete()
+async def delete_target(
+    target_id: int,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_auth)
+):
+    """Delete a monitoring target."""
+    deleted = db.query(MonitoredTarget).filter(MonitoredTarget.id == target_id).delete()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Target not found")
+    
     db.commit()
     
     # Notify Java Agent
-    redis_client.publish("netadmin_events", "CONFIG_UPDATE:MONITORING")
+    try:
+        redis_client.publish("netadmin_events", "CONFIG_UPDATE:MONITORING")
+    except Exception as e:
+        logger.error(f"Redis publish error: {e}")
     
+    logger.info(f"Deleted monitoring target: {target_id}")
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
-# --- Backup Operations ---
-@app.get("/api/backups/download/{filename}")
-async def download_backup(filename: str, _: None = Depends(verify_auth)):
-    file_path = os.path.join("/backups", filename)
-    # Basic path traversal protection
-    if ".." in filename or not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(file_path, filename=filename)
 
-# --- Inventory Management (Phase 5) ---
+# --- Backup Operations ---
+
+@app.get("/api/backups/download/{filename}")
+async def download_backup(filename: str, _: bool = Depends(verify_auth)):
+    """Download a backup file."""
+    # Sanitize filename (prevent path traversal)
+    safe_filename = os.path.basename(filename)
+    if safe_filename != filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    
+    file_path = os.path.join("/backups", safe_filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    return FileResponse(file_path, filename=safe_filename)
+
+
+# --- Inventory Management ---
+
+def parse_fio(full_name: str) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Parse Russian FIO format: 'Фамилия Имя Отчество' into parts."""
+    if not full_name:
+        return (None, None, None)
+    parts = full_name.strip().split()
+    if len(parts) == 0:
+        return (None, None, None)
+    elif len(parts) == 1:
+        return (parts[0], None, None)
+    elif len(parts) == 2:
+        return (parts[0], parts[1], None)
+    else:
+        return (parts[0], parts[1], " ".join(parts[2:]))
+
+
 @app.get("/inventory", response_class=HTMLResponse)
 async def inventory_page(
     request: Request,
-    search: Optional[str] = None,
-    sort: Optional[str] = None,
-    order: Optional[str] = "asc",
+    search: Optional[str] = Query(None, max_length=100),
+    sort: Optional[str] = Query(None, max_length=50),
+    order: Literal["asc", "desc"] = "asc",
     db: Session = Depends(get_db),
-    _: None = Depends(verify_auth)
+    _: bool = Depends(verify_auth)
 ):
     """Inventory Grid UI V2.0 - with sorting and expandable rows."""
     query = db.query(Employee)
@@ -260,9 +509,10 @@ async def inventory_page(
             (Employee.email.ilike(search_filter))
         )
     
-    # Server-side sorting
-    if sort:
-        sort_column = getattr(Employee, sort, None)
+    # Validate and apply sorting (whitelist approach)
+    validated_sort = SortColumn.validate(sort)
+    if validated_sort:
+        sort_column = getattr(Employee, validated_sort, None)
         if sort_column is not None:
             if order == "desc":
                 query = query.order_by(sort_column.desc())
@@ -274,21 +524,49 @@ async def inventory_page(
     
     employees = query.limit(500).all()
     
+    # Convert to JSON-serializable format for Alpine.js
+    employees_data = []
+    for e in employees:
+        employees_data.append({
+            "id": e.id,
+            "full_name": e.full_name,
+            "company": e.company,
+            "department": e.department,
+            "location": e.location,
+            "email": e.email,
+            "phone_type": e.phone_type,
+            "internal_phone": e.internal_phone,
+            "workstation": e.workstation,
+            "device_type": e.device_type,
+            "specs_cpu": e.specs_cpu,
+            "specs_gpu": e.specs_gpu,
+            "specs_ram": e.specs_ram,
+            "monitor": e.monitor,
+            "ups": e.ups,
+            "has_ad": e.has_ad or False,
+            "has_drweb": e.has_drweb or False,
+            "has_zabbix": e.has_zabbix or False,
+            "ad_login": e.ad_login,
+            "notes": e.notes,
+            "is_active": e.is_active if e.is_active is not None else True
+        })
+    
     return templates.TemplateResponse("inventory.html", {
         "request": request,
-        "employees": employees,
+        "employees": employees_data,
         "search": search or "",
         "sort": sort or "",
-        "order": order or "asc"
+        "order": order
     })
+
 
 @app.get("/api/employees")
 async def get_employees(
-    search: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0,
+    search: Optional[str] = Query(None, max_length=100),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
-    _: None = Depends(verify_auth)
+    _: bool = Depends(verify_auth)
 ):
     """Get employees as JSON (for AJAX updates)."""
     query = db.query(Employee)
@@ -316,7 +594,7 @@ async def get_employees(
                 "id": e.id,
                 "full_name": e.full_name,
                 "department": e.department,
-                "phone": e.phone,
+                "internal_phone": e.internal_phone,
                 "workstation": e.workstation,
                 "ad_login": e.ad_login,
                 "email": e.email,
@@ -327,19 +605,6 @@ async def get_employees(
         ]
     }
 
-def parse_fio(full_name: str):
-    """Parse Russian FIO format: 'Фамилия Имя Отчество' into parts."""
-    if not full_name:
-        return (None, None, None)
-    parts = full_name.strip().split()
-    if len(parts) == 0:
-        return (None, None, None)
-    elif len(parts) == 1:
-        return (parts[0], None, None)
-    elif len(parts) == 2:
-        return (parts[0], parts[1], None)
-    else:
-        return (parts[0], parts[1], " ".join(parts[2:]))
 
 @app.post("/api/employees")
 async def create_employee(
@@ -363,86 +628,115 @@ async def create_employee(
     has_zabbix: bool = Form(False),
     notes: str = Form(None),
     db: Session = Depends(get_db),
-    _: None = Depends(verify_auth)
+    _: bool = Depends(verify_auth)
 ):
     """Create new employee with all V2.0 fields."""
-    last_name, first_name, middle_name = parse_fio(full_name)
+    # Validate via Pydantic
+    try:
+        validated = EmployeeCreate(
+            full_name=full_name,
+            company=company,
+            department=department,
+            location=location,
+            internal_phone=internal_phone,
+            phone_type=phone_type or 'NONE',
+            workstation=workstation,
+            device_type=device_type,
+            specs_cpu=specs_cpu,
+            specs_gpu=specs_gpu,
+            specs_ram=specs_ram,
+            monitor=monitor,
+            ups=ups,
+            ad_login=ad_login,
+            email=email,
+            has_ad=has_ad,
+            has_drweb=has_drweb,
+            has_zabbix=has_zabbix,
+            notes=notes
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    last_name, first_name, middle_name = parse_fio(validated.full_name)
     employee = Employee(
-        company=company,
+        company=validated.company,
         last_name=last_name,
         first_name=first_name,
         middle_name=middle_name,
-        department=department,
-        location=location,
-        internal_phone=internal_phone,
-        phone_type=phone_type or 'NONE',
-        workstation=workstation,
-        device_type=device_type,
-        specs_cpu=specs_cpu,
-        specs_gpu=specs_gpu,
-        specs_ram=specs_ram,
-        monitor=monitor,
-        ups=ups,
-        has_ad=has_ad,
-        has_drweb=has_drweb,
-        has_zabbix=has_zabbix,
-        ad_login=ad_login,
-        email=email,
-        notes=notes
+        department=validated.department,
+        location=validated.location,
+        internal_phone=validated.internal_phone,
+        phone_type=validated.phone_type,
+        workstation=validated.workstation,
+        device_type=validated.device_type,
+        specs_cpu=validated.specs_cpu,
+        specs_gpu=validated.specs_gpu,
+        specs_ram=validated.specs_ram,
+        monitor=validated.monitor,
+        ups=validated.ups,
+        has_ad=validated.has_ad,
+        has_drweb=validated.has_drweb,
+        has_zabbix=validated.has_zabbix,
+        ad_login=validated.ad_login,
+        email=validated.email,
+        notes=validated.notes
     )
     db.add(employee)
     db.commit()
     db.refresh(employee)
     
+    logger.info(f"Created employee: {employee.full_name} (ID: {employee.id})")
     return RedirectResponse(url="/inventory", status_code=status.HTTP_303_SEE_OTHER)
+
 
 @app.patch("/api/employees/{employee_id}")
 async def update_employee(
     employee_id: int,
-    full_name: Optional[str] = None,
-    department: Optional[str] = None,
-    phone: Optional[str] = None,
-    workstation: Optional[str] = None,
-    ad_login: Optional[str] = None,
-    email: Optional[str] = None,
-    notes: Optional[str] = None,
+    request: Request,
     db: Session = Depends(get_db),
-    _: None = Depends(verify_auth)
+    _: bool = Depends(verify_auth)
 ):
-    """Update employee (inline edit)."""
+    """Update employee (inline edit) - accepts JSON body."""
     employee = db.query(Employee).filter(Employee.id == employee_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
+    try:
+        body = await request.json()
+        validated = EmployeeUpdate(**body)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
     # Update only provided fields
-    if full_name is not None:
-        last_name, first_name, middle_name = parse_fio(full_name)
+    if validated.full_name is not None:
+        last_name, first_name, middle_name = parse_fio(validated.full_name)
         employee.last_name = last_name
         employee.first_name = first_name
         employee.middle_name = middle_name
-    if department is not None:
-        employee.department = department
-    if phone is not None:
-        employee.phone = phone
-    if workstation is not None:
-        employee.workstation = workstation
-    if ad_login is not None:
-        employee.ad_login = ad_login
-    if email is not None:
-        employee.email = email
-    if notes is not None:
-        employee.notes = notes
+    if validated.department is not None:
+        employee.department = validated.department
+    if validated.internal_phone is not None:
+        employee.internal_phone = validated.internal_phone
+    if validated.workstation is not None:
+        employee.workstation = validated.workstation
+    if validated.ad_login is not None:
+        employee.ad_login = validated.ad_login
+    if validated.email is not None:
+        employee.email = validated.email
+    if validated.notes is not None:
+        employee.notes = validated.notes
     
-    employee.updated_at = func.now()
     db.commit()
+    logger.info(f"Updated employee: {employee.full_name} (ID: {employee_id})")
     
     return {"status": "success"}
+
 
 @app.post("/api/employees/{employee_id}/toggle")
 async def toggle_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    _: None = Depends(verify_auth)
+    _: bool = Depends(verify_auth)
 ):
     """Toggle employee active status (disable/enable)."""
     employee = db.query(Employee).filter(Employee.id == employee_id).first()
@@ -450,19 +744,32 @@ async def toggle_employee(
         raise HTTPException(status_code=404, detail="Employee not found")
     
     employee.is_active = not employee.is_active
-    employee.updated_at = func.now()
     db.commit()
     
+    logger.info(f"Toggled employee {employee_id}: is_active={employee.is_active}")
     return {"status": "success", "is_active": employee.is_active}
+
 
 @app.delete("/api/employees/{employee_id}")
 async def delete_employee(
     employee_id: int,
     db: Session = Depends(get_db),
-    _: None = Depends(verify_auth)
+    _: bool = Depends(verify_auth)
 ):
     """Delete employee (hard delete)."""
-    db.query(Employee).filter(Employee.id == employee_id).delete()
+    deleted = db.query(Employee).filter(Employee.id == employee_id).delete()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
     db.commit()
+    logger.info(f"Deleted employee: {employee_id}")
     
     return {"status": "success"}
+
+
+# --- Health Check ---
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for Docker/Kubernetes."""
+    return {"status": "healthy", "version": "3.0.0"}

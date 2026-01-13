@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -15,6 +16,14 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
 import java.util.List;
 
+/**
+ * Dynamic Scheduler Service for network monitoring.
+ * 
+ * Thread Safety:
+ * - Uses ConcurrentHashMap for scheduled tasks
+ * - All DB operations are @Transactional
+ * - Scheduler pool handles concurrent execution
+ */
 @Service
 public class DynamicSchedulerService {
 
@@ -85,7 +94,12 @@ public class DynamicSchedulerService {
             target.getName(), target.getHostname(), target.getIntervalSeconds());
     }
 
-    private void performCheck(Long targetId) {
+    /**
+     * Perform health check for a target.
+     * This method is called from scheduler threads - must be thread-safe.
+     */
+    @Transactional
+    protected void performCheck(Long targetId) {
         repository.findById(targetId).ifPresent(target -> {
             String hostname = target.getHostname();
             String previousStatus = target.getLastStatus();
