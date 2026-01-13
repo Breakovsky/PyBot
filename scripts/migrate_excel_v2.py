@@ -187,9 +187,15 @@ def parse_company_domain(company: str):
 
 def clean_string(value):
     """Clean string value, return None if empty."""
-    if not value or value == "None":
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        # Convert numbers to string
+        value = str(value)
+    if not value or value == "None" or str(value).strip() == "":
         return None
     cleaned = str(value).strip()
+    # Don't return empty strings, but keep whitespace-only strings if they exist
     return cleaned if cleaned else None
 
 
@@ -284,9 +290,14 @@ def parse_excel_data_v2(wb):
 
             internal_phone = None
             if phone_raw:
-                # Clean phone: remove non-digits except + at start
-                phone_clean = phone_raw.replace(" ", "").replace("-", "").replace("(", "").replace(")")
-                internal_phone = phone_clean if phone_clean else None
+                try:
+                    # Clean phone: remove non-digits except + at start
+                    phone_str = str(phone_raw) if phone_raw else ""
+                    phone_clean = phone_str.replace(" ", "").replace("-", "").replace("(", "").replace(")")
+                    internal_phone = phone_clean if phone_clean else None
+                except Exception as e:
+                    logger.warning(f"Row {idx}: Error cleaning phone '{phone_raw}': {e}")
+                    internal_phone = str(phone_raw).strip() if phone_raw else None
             
             # Parse device type
             device_type = None
