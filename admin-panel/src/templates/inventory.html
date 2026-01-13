@@ -743,7 +743,14 @@
                             if (aVal == null) aVal = '';
                             if (bVal == null) bVal = '';
                             
-                            // Convert to string for comparison
+                            // Special handling for ID (numeric sort)
+                            if (this.sortField === 'id') {
+                                aVal = parseInt(aVal) || 0;
+                                bVal = parseInt(bVal) || 0;
+                                return this.sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+                            }
+                            
+                            // String comparison for other fields
                             aVal = String(aVal).toLowerCase();
                             bVal = String(bVal).toLowerCase();
                             
