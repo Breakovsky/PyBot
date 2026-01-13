@@ -28,7 +28,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, validator, EmailStr
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, func, Text
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, func, Text, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 
@@ -685,6 +685,13 @@ async def create_employee(
     db.commit()
     db.refresh(employee)
     
+    # Sync sequence after insert
+    try:
+        db.execute(text("SELECT sync_employees_id_sequence()"))
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Failed to sync sequence: {e}")
+    
     logger.info(f"Created employee: {employee.full_name} (ID: {employee.id})")
     return RedirectResponse(url="/inventory", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -762,6 +769,14 @@ async def delete_employee(
         raise HTTPException(status_code=404, detail="Employee not found")
     
     db.commit()
+    
+    # Sync sequence after delete
+    try:
+        db.execute(text("SELECT sync_employees_id_sequence()"))
+        db.commit()
+    except Exception as e:
+        logger.warning(f"Failed to sync sequence: {e}")
+    
     logger.info(f"Deleted employee: {employee_id}")
     
     return {"status": "success"}

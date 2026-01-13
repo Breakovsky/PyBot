@@ -464,6 +464,14 @@ def migrate_to_db_v2(employees, conn, mode="insert"):
                 conn.rollback()
                 continue
     
+    # Sync sequence after migration
+    try:
+        cursor.execute("SELECT sync_employees_id_sequence()")
+        conn.commit()
+        logger.info("✅ Sequence synchronized after migration")
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to sync sequence: {e}")
+    
     else:  # insert mode
         # Simple INSERT - import ALL valid records
         query = """
@@ -498,6 +506,14 @@ def migrate_to_db_v2(employees, conn, mode="insert"):
                 continue
         
         conn.commit()
+        
+        # Sync sequence after migration
+        try:
+            cursor.execute("SELECT sync_employees_id_sequence()")
+            conn.commit()
+            logger.info("✅ Sequence synchronized after migration")
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to sync sequence: {e}")
     
     cursor.close()
     
