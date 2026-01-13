@@ -1,26 +1,122 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ru" :class="{ 'dark': darkMode }">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NetAdmin Login</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title>Login - NetAdmin Control Plane</title>
+    
+    <!-- Instant Dark Mode Script -->
+    <script>
+        const theme = localStorage.getItem('theme') || 
+                     (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+        }
+    </script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    
+    <!-- Inter Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
     <style>
-        body { background-color: #f8f9fa; display: flex; align-items: center; justify-content: center; height: 100vh; }
-        .login-card { width: 100%; max-width: 400px; padding: 2rem; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); background: white; }
+        * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        
+        .dark body {
+            background: linear-gradient(135deg, #1e3a8a 0%, #4c1d95 100%);
+        }
     </style>
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
 </head>
-<body>
-    <div class="login-card">
-        <h3 class="text-center mb-4">NetAdmin Control</h3>
-        <form action="/login" method="post">
-            <div class="mb-3">
-                <label class="form-label">Admin Password</label>
-                <input type="password" name="password" class="form-control" required>
+<body class="min-h-screen flex items-center justify-center px-4" x-data="{ darkMode: localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches), error: '{{ request.query_params.get('error', '') }}' }">
+    <div class="w-full max-w-md">
+        <!-- Login Card -->
+        <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 border border-gray-200 dark:border-gray-700">
+            <!-- Logo & Title -->
+            <div class="text-center mb-8">
+                <div class="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-primary-500 to-primary-700 rounded-2xl mb-4">
+                    <span class="text-white font-bold text-2xl">NA</span>
+                </div>
+                <h1 class="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">NetAdmin Control Plane</h1>
+                <p class="text-sm text-gray-500 dark:text-gray-400">Enter your admin password to continue</p>
             </div>
-            <button type="submit" class="btn btn-primary w-100">Login</button>
-        </form>
+            
+            <!-- Error Message -->
+            <div x-show="error" 
+                 x-transition
+                 class="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <p class="text-sm text-red-600 dark:text-red-400" x-text="error"></p>
+            </div>
+            
+            <!-- Login Form -->
+            <form action="/login" method="post" @submit.prevent="submitForm">
+                <div class="mb-6">
+                    <label for="password" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                        Admin Password
+                    </label>
+                    <input type="password" 
+                           id="password" 
+                           name="password" 
+                           required
+                           autofocus
+                           class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors"
+                           placeholder="Enter password">
+                </div>
+                
+                <button type="submit" 
+                        class="w-full px-4 py-3 bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 text-white font-semibold rounded-lg shadow-lg hover:shadow-xl transform hover:scale-[1.02] transition-all duration-200">
+                    Sign In
+                </button>
+            </form>
+            
+            <!-- Theme Toggle -->
+            <div class="mt-6 flex items-center justify-center">
+                <button @click="toggleTheme()" 
+                        class="p-2 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                    <svg x-show="!darkMode" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                    </svg>
+                    <svg x-show="darkMode" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <p class="text-center mt-6 text-sm text-white/80 dark:text-white/60">
+            NetAdmin v3.0 - Infrastructure Management
+        </p>
     </div>
+    
+    <script>
+        function toggleTheme() {
+            this.darkMode = !this.darkMode;
+            localStorage.setItem('theme', this.darkMode ? 'dark' : 'light');
+            if (this.darkMode) {
+                document.documentElement.classList.add('dark');
+            } else {
+                document.documentElement.classList.remove('dark');
+            }
+        }
+        
+        function submitForm() {
+            event.target.submit();
+        }
+    </script>
 </body>
 </html>
-

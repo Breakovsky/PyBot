@@ -325,7 +325,8 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         "request": request,
         "targets": targets,
         "containers": containers,
-        "backups": backups
+        "backups": backups,
+        "current_page": "dashboard"
     })
 
 
@@ -556,7 +557,8 @@ async def inventory_page(
         "employees": employees_data,
         "search": search or "",
         "sort": sort or "",
-        "order": order
+        "order": order,
+        "current_page": "inventory"
     })
 
 
