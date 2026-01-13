@@ -1,0 +1,11 @@
+aiogram
+aiohttp
+openpyxl
+msoffcrypto-tool
+nest_asyncio
+pywin32
+python-dotenv
+flask
+flask-cors
+beautifulsoup4
+ldap3

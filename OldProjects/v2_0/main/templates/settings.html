@@ -1,0 +1,194 @@
+{% extends 'base.html' %}
+
+{% block title %}Настройки • SoftBot Admin{% endblock %}
+{% block body_class %}dashboard-page{% endblock %}
+
+{% block content %}
+<div class="app-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <div class="logo-small">
+                <svg width="32" height="32" viewBox="0 0 48 48" fill="none">
+                    <rect width="48" height="48" rx="12" fill="url(#logo-grad)"/>
+                    <path d="M16 24L22 30L32 18" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    <defs>
+                        <linearGradient id="logo-grad" x1="0" y1="0" x2="48" y2="48">
+                            <stop offset="0%" stop-color="#6366f1"/>
+                            <stop offset="100%" stop-color="#8b5cf6"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+            </div>
+            <span class="logo-text">SoftBot</span>
+        </div>
+        
+        <nav class="sidebar-nav">
+            <a href="{{ url_for('dashboard') }}" class="nav-item">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <rect x="2.5" y="2.5" width="6.67" height="6.67" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <rect x="2.5" y="10.83" width="6.67" height="6.67" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <rect x="10.83" y="2.5" width="6.67" height="6.67" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                    <rect x="10.83" y="10.83" width="6.67" height="6.67" rx="1.5" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+                Дашборд
+            </a>
+            <a href="{{ url_for('servers') }}" class="nav-item">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <rect x="2.5" y="3.33" width="15" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                    <rect x="2.5" y="11.67" width="15" height="5" rx="1" stroke="currentColor" stroke-width="1.5"/>
+                    <circle cx="5.83" cy="5.83" r="0.83" fill="currentColor"/>
+                    <circle cx="5.83" cy="14.17" r="0.83" fill="currentColor"/>
+                </svg>
+                Серверы
+            </a>
+            <a href="{{ url_for('ip_addresses') }}" class="nav-item">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.5"/>
+                    <circle cx="10" cy="10" r="3" fill="currentColor"/>
+                    <path d="M10 2.5V4.17M10 15.83V17.5M17.5 10H15.83M4.17 10H2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                IP-адреса
+            </a>
+            <a href="{{ url_for('metrics') }}" class="nav-item">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M2.5 15.83L7.5 10.83L11.67 15L17.5 9.17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <circle cx="17.5" cy="9.17" r="1.67" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+                Метрики
+            </a>
+            <a href="{{ url_for('users') }}" class="nav-item">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <circle cx="10" cy="6.67" r="3.33" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M3.33 16.67C3.33 13.33 6.11 10.83 10 10.83C13.89 10.83 16.67 13.33 16.67 16.67" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                Пользователи
+            </a>
+            <a href="{{ url_for('settings') }}" class="nav-item active">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M10 2.5V4.17M10 15.83V17.5M17.5 10H15.83M4.17 10H2.5M15.3 4.7L14.12 5.88M5.88 14.12L4.7 15.3M15.3 15.3L14.12 14.12M5.88 5.88L4.7 4.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                Настройки
+            </a>
+        </nav>
+        
+        <div class="sidebar-footer">
+            <div class="user-info">
+                <div class="user-avatar">{{ user_email[0].upper() }}</div>
+                <div class="user-details">
+                    <span class="user-email">{{ user_email }}</span>
+                </div>
+            </div>
+            <a href="{{ url_for('logout') }}" class="logout-btn" title="Выйти">
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M7.5 17.5H4.17C3.24 17.5 2.5 16.76 2.5 15.83V4.17C2.5 3.24 3.24 2.5 4.17 2.5H7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                    <path d="M13.33 14.17L17.5 10L13.33 5.83" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <path d="M17.5 10H7.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+            </a>
+        </div>
+    </aside>
+    
+    <!-- Main Content -->
+    <main class="main-content">
+        <header class="page-header">
+            <div class="header-title">
+                <h1>Настройки</h1>
+                <p>Конфигурация бота</p>
+            </div>
+        </header>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <div class="settings-container">
+            <form method="POST" action="{{ url_for('save_settings') }}" class="settings-form">
+                <!-- Telegram Settings -->
+                <section class="settings-section">
+                    <h2 class="settings-section-title">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                            <path d="M21 5L2 12.5L9 14M21 5L18.5 20L9 14M21 5L9 14M9 14V19L12 15.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        </svg>
+                        Telegram топики
+                    </h2>
+                    
+                    <div class="settings-grid">
+                        <div class="setting-item">
+                            <label for="ping_topic">Топик пинга</label>
+                            <input type="number" id="ping_topic" name="ping_topic_id" 
+                                   value="{{ settings.ping_topic_id }}" readonly>
+                        </div>
+                        <div class="setting-item">
+                            <label for="bot_topic">Топик бота</label>
+                            <input type="number" id="bot_topic" name="bot_topic_id" 
+                                   value="{{ settings.bot_topic_id }}" readonly>
+                        </div>
+                        <div class="setting-item">
+                            <label for="metrics_topic">Топик метрик</label>
+                            <input type="number" id="metrics_topic" name="metrics_topic_id" 
+                                   value="{{ settings.metrics_topic_id }}" readonly>
+                        </div>
+                        <div class="setting-item">
+                            <label for="tasks_topic">Топик заявок OTRS</label>
+                            <input type="number" id="tasks_topic" name="tasks_topic_id" 
+                                   value="{{ settings.tasks_topic_id }}" readonly>
+                        </div>
+                    </div>
+                </section>
+                
+                <!-- SMTP Settings -->
+                <section class="settings-section">
+                    <h2 class="settings-section-title">
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                            <path d="M3 7L10.35 12.85C11.35 13.6 12.65 13.6 13.65 12.85L21 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                        SMTP настройки
+                    </h2>
+                    
+                    <div class="settings-grid">
+                        <div class="setting-item">
+                            <label for="smtp_host">SMTP сервер</label>
+                            <input type="text" id="smtp_host" name="smtp_host" 
+                                   value="{{ settings.smtp_host }}" readonly>
+                        </div>
+                        <div class="setting-item">
+                            <label for="smtp_port">Порт</label>
+                            <input type="number" id="smtp_port" name="smtp_port" 
+                                   value="{{ settings.smtp_port }}" readonly>
+                        </div>
+                        <div class="setting-item">
+                            <label for="smtp_user">Email отправителя</label>
+                            <input type="email" id="smtp_user" name="smtp_user" 
+                                   value="{{ settings.smtp_user }}" readonly>
+                        </div>
+                        <div class="setting-item">
+                            <label for="smtp_from">Имя отправителя</label>
+                            <input type="text" id="smtp_from" name="smtp_from_name" 
+                                   value="{{ settings.smtp_from_name }}" readonly>
+                        </div>
+                    </div>
+                </section>
+                
+                <div class="settings-note">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M10 6.67V10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        <circle cx="10" cy="13.33" r="0.83" fill="currentColor"/>
+                    </svg>
+                    <p>Настройки загружаются из файла <code>.env</code>. Для изменения отредактируйте файл и перезапустите бота.</p>
+                </div>
+            </form>
+        </div>
+    </main>
+</div>
+{% endblock %}
+

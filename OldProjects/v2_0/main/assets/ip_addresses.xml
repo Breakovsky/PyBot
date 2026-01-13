@@ -1,0 +1,36 @@
+<ip_groups>
+    <group name="Видеосервера">
+        <device>
+            <name>TRASSIR96</name>
+            <ip>192.168.12.96</ip>
+        </device>
+        <device>
+            <name>TRASSIR97</name>
+            <ip>192.168.12.97</ip>
+        </device>
+        <device>
+            <name>TRASSIR98</name>
+            <ip>192.168.12.98</ip>
+        </device>
+        <!-- <device>
+            <name>TRASSIR99</name>
+            <ip>192.168.12.99</ip>
+        </device> -->
+    </group>
+    <group name="Основные">
+        <device>
+            <name>MainServer</name>
+            <ip>192.168.12.33</ip>
+        </device>
+        <device>
+            <name>FileServer</name>
+            <ip>192.168.12.108</ip>
+        </device>
+    </group>
+    <!-- <group name="WS">
+        <device>
+            <name>WS111</name>
+            <ip>192.168.12.111</ip>
+        </device>
+    </group> -->
+</ip_groups>

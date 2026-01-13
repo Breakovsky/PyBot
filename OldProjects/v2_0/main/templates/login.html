@@ -1,0 +1,186 @@
+{% extends 'base.html' %}
+
+{% block title %}Вход • SoftBot Admin{% endblock %}
+{% block body_class %}auth-page{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-background">
+        <div class="bg-gradient"></div>
+        <div class="bg-grid"></div>
+        <div class="floating-shapes">
+            <div class="shape shape-1"></div>
+            <div class="shape shape-2"></div>
+            <div class="shape shape-3"></div>
+        </div>
+    </div>
+    
+    <div class="auth-card">
+        <div class="auth-header">
+            <div class="logo">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                    <rect width="48" height="48" rx="12" fill="url(#logo-gradient)"/>
+                    <path d="M16 24L22 30L32 18" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    <defs>
+                        <linearGradient id="logo-gradient" x1="0" y1="0" x2="48" y2="48">
+                            <stop offset="0%" stop-color="#6366f1"/>
+                            <stop offset="100%" stop-color="#8b5cf6"/>
+                        </linearGradient>
+                    </defs>
+                </svg>
+            </div>
+            <h1>SoftBot Admin</h1>
+            <p class="subtitle">Панель управления ботом</p>
+        </div>
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        
+        <form method="POST" class="auth-form" id="login-form">
+            <div class="form-group">
+                <label for="email">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <path d="M2.5 5.83333L8.69 10.0667C9.52 10.6267 10.48 10.6267 11.31 10.0667L17.5 5.83333" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                        <rect x="2.5" y="4.16667" width="15" height="11.6667" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                    </svg>
+                    Корпоративный email
+                </label>
+                <input type="email" id="email" name="email" 
+                       value="{{ email or '' }}"
+                       placeholder="user@meb52.com" 
+                       required autocomplete="email"
+                       autofocus>
+                <span class="hint">Разрешены: @meb52.com, @tdegregor.ru, @test.com</span>
+            </div>
+            
+            {% if has_password %}
+            <input type="hidden" name="login_method" value="password" id="login_method">
+            <input type="hidden" id="has_password_flag" value="1">
+            
+            <div class="form-group" id="password-group">
+                <label for="password">
+                    <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <rect x="2.5" y="8.33333" width="15" height="9.16667" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                        <path d="M5.83333 8.33333V5.83333C5.83333 3.99239 7.32572 2.5 9.16667 2.5H10.8333C12.6743 2.5 14.1667 3.99239 14.1667 5.83333V8.33333" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                        <circle cx="10" cy="12.9167" r="1.25" fill="currentColor"/>
+                    </svg>
+                    Пароль
+                </label>
+                <input type="password" id="password" name="password" 
+                       placeholder="Введите пароль" 
+                       autocomplete="current-password">
+            </div>
+            
+            <button type="submit" class="btn btn-primary btn-full">
+                <span>Войти</span>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M4.16667 10H15.8333M15.8333 10L10.8333 5M15.8333 10L10.8333 15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
+            
+            <div class="auth-actions">
+                <button type="button" class="btn btn-ghost btn-small" onclick="switchToCode()">
+                    Войти по коду на почту
+                </button>
+            </div>
+            {% else %}
+            <input type="hidden" name="login_method" value="code" id="login_method">
+            
+            <button type="submit" class="btn btn-primary btn-full" id="submit-btn">
+                <span>Получить код</span>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                    <path d="M4.16667 10H15.8333M15.8333 10L10.8333 5M15.8333 10L10.8333 15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </button>
+            {% endif %}
+        </form>
+        
+        <div class="auth-footer">
+            <p>Доступ только для агентов OTRS</p>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const emailInput = document.getElementById('email');
+    const form = document.getElementById('login-form');
+    const loginMethodInput = document.getElementById('login_method');
+    let hasPassword = {{ 'true' if has_password else 'false' }};
+    
+    // Проверяем наличие пароля при вводе email и уходе с поля
+    emailInput.addEventListener('blur', async function() {
+        const email = emailInput.value.trim().toLowerCase();
+        if (email && email.includes('@') && !hasPassword) {
+            try {
+                const response = await fetch(`/api/check-password?email=${encodeURIComponent(email)}`);
+                const data = await response.json();
+                if (data.has_password) {
+                    // Пароль есть, но форма ещё не обновлена - перезагружаем страницу
+                    window.location.href = `/login?email=${encodeURIComponent(email)}`;
+                }
+            } catch (e) {
+                console.error('Error checking password:', e);
+            }
+        }
+    });
+    
+    // При отправке формы проверяем, нужно ли сначала проверить пароль
+    form.addEventListener('submit', async function(e) {
+        const email = emailInput.value.trim().toLowerCase();
+        
+        // Если метод не указан или это метод кода, но пароль может быть
+        if (loginMethodInput && loginMethodInput.value === 'code' && email) {
+            try {
+                // Проверяем, есть ли пароль у этого пользователя
+                const response = await fetch(`/api/check-password?email=${encodeURIComponent(email)}`);
+                const data = await response.json();
+                
+                // Если пароль есть, но метод = code, значит пользователь явно выбрал код
+                // Это нормально, продолжаем отправку формы
+                if (!data.has_password) {
+                    // Пароля нет - продолжаем отправку формы для получения кода
+                    return true;
+                }
+                // Если пароль есть, но login_method='code' - это явный выбор пользователя
+                // Продолжаем отправку формы
+                return true;
+            } catch (err) {
+                console.error('Error checking password on submit:', err);
+                // В случае ошибки продолжаем обычную отправку
+            }
+        }
+    });
+});
+
+function switchToCode() {
+    document.getElementById('login_method').value = 'code';
+    const passwordGroup = document.getElementById('password-group');
+    if (passwordGroup) {
+        passwordGroup.style.display = 'none';
+        const passwordInput = document.getElementById('password');
+        if (passwordInput) {
+            passwordInput.removeAttribute('required');
+            passwordInput.value = '';
+        }
+    }
+    const submitBtn = document.querySelector('button[type="submit"]');
+    if (submitBtn) {
+        submitBtn.querySelector('span').textContent = 'Получить код';
+    }
+    const actions = document.querySelector('.auth-actions');
+    if (actions) {
+        actions.innerHTML = '';
+    }
+    document.getElementById('login-form').submit();
+}
+</script>
+{% endblock %}
+

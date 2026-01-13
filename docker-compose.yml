@@ -89,8 +89,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
-      - ./storage/postgresql-data:/var/lib/postgresql/data
-      - ./config/init_rbac.sql:/docker-entrypoint-initdb.d/init_rbac.sql:ro
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/init_rbac.sql:/docker-entrypoint-initdb.d/01_init_rbac.sql:ro
+      - ./config/init_inventory.sql:/docker-entrypoint-initdb.d/02_init_inventory.sql:ro
     networks:
       - bot_net
     healthcheck:
@@ -123,7 +124,7 @@ services:
     restart: always
     command: redis-server --save 60 1 --loglevel warning
     volumes:
-      - ./storage/redis-data:/data
+      - redis_data:/data
     networks:
       - bot_net
     healthcheck:
@@ -179,3 +180,7 @@ services:
 networks:
   bot_net:
     driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

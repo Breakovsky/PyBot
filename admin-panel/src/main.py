@@ -43,6 +43,20 @@ class MonitoredTarget(Base):
     last_status = Column(String, nullable=True)
     last_check = Column(DateTime(timezone=True), nullable=True)
 
+class Employee(Base):
+    __tablename__ = "employees"
+    id = Column(Integer, primary_key=True, index=True)
+    full_name = Column(String, nullable=False, index=True)
+    department = Column(String)
+    phone = Column(String, index=True)
+    workstation = Column(String, index=True)
+    ad_login = Column(String, index=True)
+    email = Column(String, index=True)
+    notes = Column(String)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
 # Create tables (MVP approach - usually use migration tool)
 Base.metadata.create_all(bind=engine)
 
@@ -184,3 +198,169 @@ async def download_backup(filename: str, _: None = Depends(verify_auth)):
     if ".." in filename or not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(file_path, filename=filename)
+
+# --- Inventory Management (Phase 5) ---
+@app.get("/inventory", response_class=HTMLResponse)
+async def inventory_page(
+    request: Request,
+    search: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_auth)
+):
+    """Inventory Grid UI - Google Sheets-like experience."""
+    query = db.query(Employee)
+    
+    # Search filter
+    if search:
+        search_filter = f"%{search}%"
+        query = query.filter(
+            (Employee.full_name.ilike(search_filter)) |
+            (Employee.phone.ilike(search_filter)) |
+            (Employee.workstation.ilike(search_filter)) |
+            (Employee.ad_login.ilike(search_filter)) |
+            (Employee.email.ilike(search_filter))
+        )
+    
+    employees = query.order_by(Employee.full_name).limit(500).all()
+    
+    return templates.TemplateResponse("inventory.html", {
+        "request": request,
+        "employees": employees,
+        "search": search or ""
+    })
+
+@app.get("/api/employees")
+async def get_employees(
+    search: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_auth)
+):
+    """Get employees as JSON (for AJAX updates)."""
+    query = db.query(Employee)
+    
+    if search:
+        search_filter = f"%{search}%"
+        query = query.filter(
+            (Employee.full_name.ilike(search_filter)) |
+            (Employee.phone.ilike(search_filter)) |
+            (Employee.workstation.ilike(search_filter))
+        )
+    
+    total = query.count()
+    employees = query.order_by(Employee.full_name).offset(offset).limit(limit).all()
+    
+    return {
+        "total": total,
+        "employees": [
+            {
+                "id": e.id,
+                "full_name": e.full_name,
+                "department": e.department,
+                "phone": e.phone,
+                "workstation": e.workstation,
+                "ad_login": e.ad_login,
+                "email": e.email,
+                "notes": e.notes,
+                "is_active": e.is_active
+            }
+            for e in employees
+        ]
+    }
+
+@app.post("/api/employees")
+async def create_employee(
+    full_name: str = Form(...),
+    department: str = Form(None),
+    phone: str = Form(None),
+    workstation: str = Form(None),
+    ad_login: str = Form(None),
+    email: str = Form(None),
+    notes: str = Form(None),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_auth)
+):
+    """Create new employee."""
+    employee = Employee(
+        full_name=full_name,
+        department=department,
+        phone=phone,
+        workstation=workstation,
+        ad_login=ad_login,
+        email=email,
+        notes=notes
+    )
+    db.add(employee)
+    db.commit()
+    db.refresh(employee)
+    
+    return {"status": "success", "id": employee.id}
+
+@app.patch("/api/employees/{employee_id}")
+async def update_employee(
+    employee_id: int,
+    full_name: Optional[str] = None,
+    department: Optional[str] = None,
+    phone: Optional[str] = None,
+    workstation: Optional[str] = None,
+    ad_login: Optional[str] = None,
+    email: Optional[str] = None,
+    notes: Optional[str] = None,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_auth)
+):
+    """Update employee (inline edit)."""
+    employee = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    # Update only provided fields
+    if full_name is not None:
+        employee.full_name = full_name
+    if department is not None:
+        employee.department = department
+    if phone is not None:
+        employee.phone = phone
+    if workstation is not None:
+        employee.workstation = workstation
+    if ad_login is not None:
+        employee.ad_login = ad_login
+    if email is not None:
+        employee.email = email
+    if notes is not None:
+        employee.notes = notes
+    
+    employee.updated_at = func.now()
+    db.commit()
+    
+    return {"status": "success"}
+
+@app.post("/api/employees/{employee_id}/toggle")
+async def toggle_employee(
+    employee_id: int,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_auth)
+):
+    """Toggle employee active status (disable/enable)."""
+    employee = db.query(Employee).filter(Employee.id == employee_id).first()
+    if not employee:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    
+    employee.is_active = not employee.is_active
+    employee.updated_at = func.now()
+    db.commit()
+    
+    return {"status": "success", "is_active": employee.is_active}
+
+@app.delete("/api/employees/{employee_id}")
+async def delete_employee(
+    employee_id: int,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_auth)
+):
+    """Delete employee (hard delete)."""
+    db.query(Employee).filter(Employee.id == employee_id).delete()
+    db.commit()
+    
+    return {"status": "success"}
