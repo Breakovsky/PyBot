@@ -5,6 +5,7 @@ Diagnostics handler for system status checks.
 import os
 import time
 import logging
+import html
 import redis.asyncio as redis
 from datetime import datetime, timedelta
 from aiogram.types import Message
@@ -100,35 +101,43 @@ async def handle_test_command(message: Message, user: TelegramUser, redis_client
         # Check DB
         db_status = await get_db_status()
         
-        # Build response
+        # Build response (escape user data, keep HTML tags)
+        # Escape user-provided data to prevent HTML injection
+        safe_user_info = html.escape(user_info)
+        safe_role_info = html.escape(role_info)
+        safe_uptime = html.escape(uptime_str)
+        
         response_lines = [
             "🛠 <b>NetAdmin System Status</b>",
-            "━━━━━━━━━━━━━━━━━━━━━━",
-            f"👤 <b>You:</b> {user_info}",
-            f"👑 <b>Role:</b> {role_info} (Verified from DB)",
+            "════════════════════════════",
+            f"👤 <b>You:</b> {safe_user_info}",
+            f"👑 <b>Role:</b> {safe_role_info} (Verified from DB)",
             "",
-            f"🤖 <b>Bot Uptime:</b> {uptime_str}",
+            f"🤖 <b>Bot Uptime:</b> {safe_uptime}",
             "",
             f"📡 <b>Redis:</b> {redis_status['status']}",
         ]
         
         if "ping_ms" in redis_status:
-            response_lines.append(f"   └─ Ping: {redis_status['ping_ms']}ms")
+            response_lines.append(f"   • Ping: {redis_status['ping_ms']}ms")
         elif "error" in redis_status:
-            response_lines.append(f"   └─ Error: {redis_status['error']}")
+            error_msg = html.escape(str(redis_status['error']))
+            response_lines.append(f"   • Error: {error_msg}")
         
         response_lines.append("")
         response_lines.append(f"🐘 <b>DB:</b> {db_status['status']}")
         
         if "users" in db_status:
-            response_lines.append(f"   └─ Users: {db_status['users']}")
-            response_lines.append(f"   └─ Assets: {db_status['employees']}")
+            response_lines.append(f"   • Users: {db_status['users']}")
+            response_lines.append(f"   • Assets: {db_status['employees']}")
         elif "error" in db_status:
-            response_lines.append(f"   └─ Error: {db_status['error']}")
+            error_msg = html.escape(str(db_status['error']))
+            response_lines.append(f"   • Error: {error_msg}")
         
         response_lines.append("")
-        response_lines.append("━━━━━━━━━━━━━━━━━━━━━━")
-        response_lines.append(f"⏰ <i>Checked at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>")
+        response_lines.append("════════════════════════════")
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        response_lines.append(f"⏰ <i>Checked at: {timestamp}</i>")
         
         response = "\n".join(response_lines)
         await message.reply(response, parse_mode="HTML")

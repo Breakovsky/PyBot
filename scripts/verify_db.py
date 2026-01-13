@@ -2,6 +2,13 @@
 """
 Database Verification Script
 Prints top rows from telegram_users and employees tables.
+
+Usage (via Docker - RECOMMENDED):
+    docker-compose exec python-bot python scripts/verify_db.py
+
+Usage (local - requires psycopg2):
+    pip install psycopg2-binary
+    python scripts/verify_db.py
 """
 
 import os
@@ -11,13 +18,24 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+try:
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+except ImportError:
+    print("❌ Error: psycopg2 not found!")
+    print("\n💡 Solution: Run via Docker (recommended):")
+    print("   docker-compose exec python-bot python scripts/verify_db.py")
+    print("\n   Or install locally:")
+    print("   pip install psycopg2-binary")
+    sys.exit(1)
 
 def get_db_connection():
     """Create PostgreSQL connection."""
+    # Default to Docker service name if running in container
+    default_host = "db" if os.path.exists("/.dockerenv") else "localhost"
+    
     return psycopg2.connect(
-        host=os.getenv("POSTGRES_HOST", "localhost"),
+        host=os.getenv("POSTGRES_HOST", default_host),
         database=os.getenv("POSTGRES_DB", "netadmin_db"),
         user=os.getenv("POSTGRES_USER", "netadmin"),
         password=os.getenv("POSTGRES_PASSWORD", "netadmin_secret")
