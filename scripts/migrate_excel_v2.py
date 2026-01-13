@@ -58,7 +58,8 @@ def load_protected_excel(file_path: str, password: str):
             office_file.load_key(password=password)
             office_file.decrypt(decrypted)
         decrypted.seek(0)
-        return openpyxl.load_workbook(decrypted, read_only=True)
+        # data_only=True reads the cached values instead of formulas
+        return openpyxl.load_workbook(decrypted, read_only=True, data_only=True)
     except Exception as e:
         logger.error(f"Failed to load Excel file: {e}")
         return None
@@ -230,18 +231,34 @@ def parse_excel_data_v2(wb):
     
     for idx, row in enumerate(sheet.iter_rows(min_row=2, max_row=622, values_only=True), start=2):
         try:
-            # Extract all columns with safe indexing
+            # Extract all columns with safe indexing based on debug analysis
+            # Col 0 (A): Company
+            # Col 1 (B): Full Name
+            # Col 2 (C): Location / Department
+            # Col 3 (D): Email
+            # Col 5 (F): Phone Type
+            # Col 6 (G): Internal Phone
+            # Col 7 (H): WS
+            # Col 8 (I): Device Type
+            # ...
+            
+            company = clean_string(row[0]) if len(row) > 0 and row[0] else None
             full_name_raw = clean_string(row[1]) if len(row) > 1 and row[1] else None
-            department = clean_string(row[2]) if len(row) > 2 and row[2] else None
-            company = clean_string(row[3]) if len(row) > 3 and row[3] else None
-            location = clean_string(row[4]) if len(row) > 4 and row[4] else None
-            email = clean_string(row[5]) if len(row) > 5 and row[5] else None
+            # Use Col 2 for both Department and Location as they are mixed
+            location_raw = clean_string(row[2]) if len(row) > 2 and row[2] else None
+            department = location_raw # Assumed same for now
+            location = location_raw
+            
+            email = clean_string(row[3]) if len(row) > 3 and row[3] else None
+            # Skip Col 4 (E) - Alternative Email/Formula
+            
+            phone_type_raw = clean_string(row[5]) if len(row) > 5 and row[5] else None
             phone_raw = clean_string(row[6]) if len(row) > 6 and row[6] else None
             workstation = clean_string(row[7]) if len(row) > 7 and row[7] else None
             device_type_raw = clean_string(row[8]) if len(row) > 8 and row[8] else None
             cpu = clean_string(row[9]) if len(row) > 9 and row[9] else None
-            gpu = clean_string(row[10]) if len(row) > 10 and row[10] else None
-            ram_raw = clean_string(row[11]) if len(row) > 11 and row[11] else None
+            gpu = clean_string(row[11]) if len(row) > 11 and row[11] else None # GPU is L (11)
+            ram_raw = clean_string(row[10]) if len(row) > 10 and row[10] else None # RAM is K (10)
             monitor = clean_string(row[12]) if len(row) > 12 and row[12] else None
             ups = clean_string(row[13]) if len(row) > 13 and row[13] else None
             ad_login = clean_string(row[14]) if len(row) > 14 and row[14] else None
@@ -259,7 +276,12 @@ def parse_excel_data_v2(wb):
             last_name, first_name, middle_name = parse_fio(full_name_raw)
             
             # Parse phone type and clean phone number
-            phone_type = parse_phone_type(phone_raw, notes)
+            # Pass phone_type_raw (Col F) to helper if needed, or use logic
+            phone_type = parse_phone_type(phone_type_raw, notes) # Prefer explicit column
+            if phone_type == 'NONE' and phone_raw:
+                 # Fallback to detection if Col F is empty but phone exists
+                 phone_type = parse_phone_type(phone_raw, notes)
+
             internal_phone = None
             if phone_raw:
                 # Clean phone: remove non-digits except + at start
@@ -276,7 +298,7 @@ def parse_excel_data_v2(wb):
                     device_type = 'Monoblock'
                 elif 'server' in device_lower or 'сервер' in device_lower:
                     device_type = 'Server'
-                elif 'pc' in device_lower or 'пк' in device_lower:
+                elif 'pc' in device_lower or 'пк' in device_lower or 'сб' in device_lower:
                     device_type = 'PC'
                 else:
                     device_type = 'Other'
