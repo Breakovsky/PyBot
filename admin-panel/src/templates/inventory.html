@@ -194,10 +194,10 @@
                     <span class="text-gray-500 dark:text-gray-400">Sort by:</span>
                     <select @change="window.location.href = `/inventory?sort=${$event.target.value}&order=asc`" 
                             class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm">
-                        <option value="full_name" {{ 'selected' if request.args.get('sort') == 'full_name' else '' }}>Name</option>
-                        <option value="company" {{ 'selected' if request.args.get('sort') == 'company' else '' }}>Company</option>
-                        <option value="department" {{ 'selected' if request.args.get('sort') == 'department' else '' }}>Department</option>
-                        <option value="workstation" {{ 'selected' if request.args.get('sort') == 'workstation' else '' }}>Workstation</option>
+                        <option value="last_name" {{ 'selected' if sort == 'last_name' else '' }}>Name</option>
+                        <option value="company" {{ 'selected' if sort == 'company' else '' }}>Company</option>
+                        <option value="department" {{ 'selected' if sort == 'department' else '' }}>Department</option>
+                        <option value="workstation" {{ 'selected' if sort == 'workstation' else '' }}>Workstation</option>
                     </select>
                 </div>
                 
