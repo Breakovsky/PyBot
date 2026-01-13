@@ -169,18 +169,25 @@ async def handle_asset_search(message: Message, query: str):
     Main handler for asset search queries.
     Called when user sends WS-* or text query.
     """
+    user_id = message.from_user.id
+    username = message.from_user.username or "Unknown"
+    
+    logger.info(f"🔍 Asset search started: user={username} ({user_id}), query='{query}'")
+    
     try:
         # Search in database
         employees = await search_employees(query, limit=10)
+        
+        logger.info(f"✅ Search completed: found {len(employees)} results for '{query}'")
         
         # Format and send response
         response = format_multiple_results(employees, query)
         await message.reply(response, parse_mode="HTML")
         
-        logger.info(f"Asset search by {message.from_user.id}: '{query}' -> {len(employees)} results")
+        logger.info(f"📤 Response sent to {username}: {len(response)} chars")
         
     except Exception as e:
-        logger.error(f"Error in asset search: {e}", exc_info=True)
+        logger.error(f"❌ Error in asset search for '{query}': {e}", exc_info=True)
         await message.reply(
             "❌ Произошла ошибка при поиске. Попробуйте позже.",
             parse_mode="HTML"

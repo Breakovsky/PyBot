@@ -25,3 +25,13 @@ mock_mdaemon_app/
 
 # OS
 .DS_Store
+
+# Java build artifacts
+java-agent/target/
+*.class
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.venv/

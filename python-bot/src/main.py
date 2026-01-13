@@ -78,18 +78,30 @@ async def cmd_set_topic(message: Message):
         
         await session.commit()
 
-@dp.message(F.text.regexp(r"^[Ww][Ss][-\s]?\d+")) # Workstation Pattern: WS-123, ws123, WS 123
+@dp.message(F.text.regexp(r"^[Ww][Ss][-\s]?\d+$")) # Workstation Pattern: WS-123, ws123, WS 123
 async def handle_workstation_query(message: Message):
     """Handle workstation queries like WS-101"""
     query = message.text.strip()
-    logger.info(f"Workstation query from {message.from_user.id}: {query}")
+    logger.info(f"🔍 Workstation query from {message.from_user.username} ({message.from_user.id}): '{query}'")
     await handle_asset_search(message, query)
 
 @dp.message(F.text.regexp(r"^\d{3,}$")) # Phone Pattern: 1234 or longer
 async def handle_phone_query(message: Message):
     """Handle phone number queries"""
     query = message.text.strip()
-    logger.info(f"Phone query from {message.from_user.id}: {query}")
+    logger.info(f"📞 Phone query from {message.from_user.username} ({message.from_user.id}): '{query}'")
+    await handle_asset_search(message, query)
+
+@dp.message(Command("search"))
+async def cmd_search(message: Message):
+    """Generic search command: /search <query>"""
+    args = message.text.split(maxsplit=1)
+    if len(args) < 2:
+        await message.reply("❌ Usage: /search <WS number / phone / name>")
+        return
+    
+    query = args[1].strip()
+    logger.info(f"🔎 Search command from {message.from_user.username}: '{query}'")
     await handle_asset_search(message, query)
 
 @dp.message(Command("cookie"))
@@ -112,6 +124,26 @@ async def cmd_cookie(message: Message):
         user.karma_points += 1
         await session.commit()
         await message.answer(f"🍪 Cookie given! {user.username} now has {user.karma_points} karma.")
+
+@dp.message()
+async def handle_unhandled_message(message: Message):
+    """Catch-all handler for debugging unhandled messages"""
+    text = message.text or "[non-text message]"
+    logger.info(f"❓ Unhandled message from {message.from_user.username} ({message.from_user.id}): '{text}' (type: {message.content_type})")
+    
+    # Optionally reply with help
+    if message.chat.type == "private":
+        await message.reply(
+            "ℹ️ Available commands:\n"
+            "/start - Register\n"
+            "/admin - Admin panel\n"
+            "/search <query> - Search employees\n"
+            "/cookie - Give karma\n\n"
+            "Or send:\n"
+            "• WS-123 (workstation)\n"
+            "• 1234 (phone)\n"
+            "• Name (text search)"
+        )
 
 # --- Background Worker (Redis Listener) ---
 async def redis_listener():
@@ -187,11 +219,30 @@ async def redis_listener():
             await asyncio.sleep(5)
 
 async def main():
-    # Start Redis Listener
-    asyncio.create_task(redis_listener())
+    """Main entry point."""
+    # Start Redis Listener as background task
+    redis_task = asyncio.create_task(redis_listener())
     
-    # Start Bot
-    await dp.start_polling(bot)
+    # Add exception handler
+    def handle_redis_exception(task):
+        try:
+            task.result()
+        except Exception as e:
+            logger.error(f"❌ Redis listener crashed: {e}", exc_info=True)
+    
+    redis_task.add_done_callback(handle_redis_exception)
+    
+    try:
+        # Start Bot
+        await dp.start_polling(bot)
+    finally:
+        # Cleanup on shutdown
+        logger.info("Shutting down...")
+        redis_task.cancel()
+        try:
+            await redis_task
+        except asyncio.CancelledError:
+            pass
 
 if __name__ == "__main__":
     asyncio.run(main())
