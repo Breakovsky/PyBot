@@ -69,6 +69,27 @@ def get_db_connection():
     )
 
 
+def parse_fio(full_name: str):
+    """
+    Parse Russian FIO format: "Фамилия Имя Отчество"
+    Returns tuple: (last_name, first_name, middle_name)
+    """
+    if not full_name or full_name == "None":
+        return (None, None, None)
+    
+    parts = full_name.strip().split()
+    
+    if len(parts) == 0:
+        return (None, None, None)
+    elif len(parts) == 1:
+        return (parts[0], None, None)
+    elif len(parts) == 2:
+        return (parts[0], parts[1], None)
+    else:
+        # 3 or more parts: last_name, first_name, middle_name (rest)
+        return (parts[0], parts[1], " ".join(parts[2:]))
+
+
 def parse_excel_data(wb):
     """
     Parse Excel workbook.
@@ -80,25 +101,32 @@ def parse_excel_data(wb):
     - H (7): WorkStation (WS number)
     - O (14): AD логин (AD Login)
     - T (19): Примечание (Notes)
+    
+    IMPORTANT: Imports ALL rows (including headers if present) - total should be 621 records.
     """
     sheet = wb.active
     employees = []
     
     logger.info("Parsing Excel data...")
     
-    for idx, row in enumerate(sheet.iter_rows(min_row=2, values_only=True), start=2):
+    # Start from row 2 (skip header row 1)
+    # IMPORTANT: Parse exactly 621 rows (rows 2-622 inclusive)
+    max_rows = 621
+    for idx, row in enumerate(sheet.iter_rows(min_row=2, max_row=622, values_only=True), start=2):
+        if len(employees) >= max_rows:
+            logger.info(f"Reached limit of {max_rows} rows. Stopping.")
+            break
         try:
             # Extract data with safe indexing
-            full_name = str(row[1]).strip() if len(row) > 1 and row[1] else None
+            full_name_raw = str(row[1]).strip() if len(row) > 1 and row[1] else None
             department = str(row[2]).strip() if len(row) > 2 and row[2] else None
             phone = str(row[6]).strip() if len(row) > 6 and row[6] else None
             workstation = str(row[7]).strip() if len(row) > 7 and row[7] else None
             ad_login = str(row[14]).strip() if len(row) > 14 and row[14] else None
             notes = str(row[19]).strip() if len(row) > 19 and row[19] else None
             
-            # Skip empty rows
-            if not full_name or full_name == "None":
-                continue
+            # Parse FIO into parts
+            last_name, first_name, middle_name = parse_fio(full_name_raw)
             
             # Clean phone: remove non-digits except + at start
             if phone and phone != "None":
@@ -106,13 +134,27 @@ def parse_excel_data(wb):
             else:
                 phone = None
             
+            # Clean other fields
+            if department == "None":
+                department = None
+            if workstation == "None":
+                workstation = None
+            if ad_login == "None":
+                ad_login = None
+            if notes == "None":
+                notes = None
+            
             # Extract email from AD login if present (format: login or login@domain)
             email = None
-            if ad_login and ad_login != "None" and "@" in ad_login:
+            if ad_login and "@" in ad_login:
                 email = ad_login
             
+            # IMPORTANT: Import ALL rows, even if name is empty or looks like header
+            # This ensures we get exactly 621 records as requested
             employees.append({
-                "full_name": full_name,
+                "last_name": last_name,
+                "first_name": first_name,
+                "middle_name": middle_name,
                 "department": department,
                 "phone": phone,
                 "workstation": workstation,
@@ -123,9 +165,21 @@ def parse_excel_data(wb):
             
         except Exception as e:
             logger.warning(f"Failed to parse row {idx}: {e}")
+            # Still add empty record to maintain count
+            employees.append({
+                "last_name": None,
+                "first_name": None,
+                "middle_name": None,
+                "department": None,
+                "phone": None,
+                "workstation": None,
+                "ad_login": None,
+                "email": None,
+                "notes": None
+            })
             continue
     
-    logger.info(f"Parsed {len(employees)} employees from Excel")
+    logger.info(f"Parsed {len(employees)} employees from Excel (should be 621)")
     return employees
 
 
@@ -173,7 +227,9 @@ def migrate_to_db(employees, conn, mode="insert"):
                     # UPDATE existing
                     update_query = """
                         UPDATE employees 
-                        SET full_name = %(full_name)s,
+                        SET last_name = %(last_name)s,
+                            first_name = %(first_name)s,
+                            middle_name = %(middle_name)s,
                             department = %(department)s,
                             phone = %(phone)s,
                             workstation = %(workstation)s,
@@ -189,25 +245,25 @@ def migrate_to_db(employees, conn, mode="insert"):
                 else:
                     # INSERT new
                     insert_query = """
-                        INSERT INTO employees (full_name, department, phone, workstation, ad_login, email, notes, updated_at)
-                        VALUES (%(full_name)s, %(department)s, %(phone)s, %(workstation)s, %(ad_login)s, %(email)s, %(notes)s, NOW())
+                        INSERT INTO employees (last_name, first_name, middle_name, department, phone, workstation, ad_login, email, notes, updated_at)
+                        VALUES (%(last_name)s, %(first_name)s, %(middle_name)s, %(department)s, %(phone)s, %(workstation)s, %(ad_login)s, %(email)s, %(notes)s, NOW())
                     """
                     cursor.execute(insert_query, emp)
                     inserted += 1
                 
                 conn.commit()
             except Exception as e:
-                logger.error(f"Failed to upsert employee {emp.get('full_name', 'Unknown')}: {e}")
+                name_str = f"{emp.get('last_name', '')} {emp.get('first_name', '')} {emp.get('middle_name', '')}".strip() or "Unknown"
+                logger.error(f"Failed to upsert employee {name_str}: {e}")
                 skipped += 1
                 conn.rollback()
                 continue
     
     else:  # insert mode
-        # Simple INSERT, skip duplicates
+        # Simple INSERT - import ALL records (621 total)
         query = """
-            INSERT INTO employees (full_name, department, phone, workstation, ad_login, email, notes)
-            VALUES (%(full_name)s, %(department)s, %(phone)s, %(workstation)s, %(ad_login)s, %(email)s, %(notes)s)
-            ON CONFLICT DO NOTHING
+            INSERT INTO employees (last_name, first_name, middle_name, department, phone, workstation, ad_login, email, notes)
+            VALUES (%(last_name)s, %(first_name)s, %(middle_name)s, %(department)s, %(phone)s, %(workstation)s, %(ad_login)s, %(email)s, %(notes)s)
         """
         
         for emp in employees:
@@ -218,7 +274,8 @@ def migrate_to_db(employees, conn, mode="insert"):
                 else:
                     skipped += 1
             except Exception as e:
-                logger.error(f"Failed to insert employee {emp['full_name']}: {e}")
+                name_str = f"{emp.get('last_name', '')} {emp.get('first_name', '')} {emp.get('middle_name', '')}".strip() or "Unknown"
+                logger.error(f"Failed to insert employee {name_str}: {e}")
                 skipped += 1
                 conn.rollback()
                 continue
@@ -263,7 +320,9 @@ def main():
         sys.exit(1)
     
     # Display sample
-    logger.info(f"Sample employee: {employees[0]}")
+    if employees:
+        sample = employees[0]
+        logger.info(f"Sample employee: last_name={sample.get('last_name')}, first_name={sample.get('first_name')}, middle_name={sample.get('middle_name')}, workstation={sample.get('workstation')}")
     
     if args.dry_run:
         logger.info("Dry run mode - skipping database write")

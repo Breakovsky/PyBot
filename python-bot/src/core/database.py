@@ -45,7 +45,11 @@ class Employee(Base):
     __tablename__ = 'employees'
     
     id = Column(Integer, primary_key=True)
-    full_name = Column(String, nullable=False)
+    last_name = Column(String)
+    first_name = Column(String)
+    middle_name = Column(String)
+    # full_name is a computed/generated column in PostgreSQL, but SQLAlchemy can still access it
+    # We'll add a property to construct it if needed
     department = Column(String)
     phone = Column(String)
     workstation = Column(String)
@@ -55,6 +59,12 @@ class Employee(Base):
     is_active = Column(Integer, default=1)  # SQLite uses integers for booleans
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    
+    @property
+    def full_name(self):
+        """Construct full name from parts."""
+        parts = [self.last_name or "", self.first_name or "", self.middle_name or ""]
+        return " ".join(p for p in parts if p).strip() or None
 
 # DB Setup
 POSTGRES_USER = os.getenv("POSTGRES_USER", "netadmin")

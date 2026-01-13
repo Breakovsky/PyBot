@@ -65,9 +65,11 @@ async def search_employees(query: str, limit: int = 10) -> List[Employee]:
             filters.append(Employee.phone.ilike(f"%{cleaned_phone}%"))
         
         else:
-            # General text search (name, ad_login, email)
+            # General text search (name parts, ad_login, email)
             search_pattern = f"%{query}%"
-            filters.append(Employee.full_name.ilike(search_pattern))
+            filters.append(Employee.last_name.ilike(search_pattern))
+            filters.append(Employee.first_name.ilike(search_pattern))
+            filters.append(Employee.middle_name.ilike(search_pattern))
             filters.append(Employee.ad_login.ilike(search_pattern))
             filters.append(Employee.email.ilike(search_pattern))
             filters.append(Employee.department.ilike(search_pattern))

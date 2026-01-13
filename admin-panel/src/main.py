@@ -46,7 +46,10 @@ class MonitoredTarget(Base):
 class Employee(Base):
     __tablename__ = "employees"
     id = Column(Integer, primary_key=True, index=True)
-    full_name = Column(String, nullable=False, index=True)
+    last_name = Column(String, index=True)
+    first_name = Column(String, index=True)
+    middle_name = Column(String, index=True)
+    # full_name is a GENERATED column in PostgreSQL, accessible as property
     department = Column(String)
     phone = Column(String, index=True)
     workstation = Column(String, index=True)
@@ -56,6 +59,12 @@ class Employee(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    @property
+    def full_name(self):
+        """Construct full name from parts."""
+        parts = [self.last_name or "", self.first_name or "", self.middle_name or ""]
+        return " ".join(p for p in parts if p).strip() or None
 
 # Create tables (MVP approach - usually use migration tool)
 Base.metadata.create_all(bind=engine)
@@ -210,18 +219,20 @@ async def inventory_page(
     """Inventory Grid UI - Google Sheets-like experience."""
     query = db.query(Employee)
     
-    # Search filter
+    # Search filter - search in all name parts and other fields
     if search:
         search_filter = f"%{search}%"
         query = query.filter(
-            (Employee.full_name.ilike(search_filter)) |
+            (Employee.last_name.ilike(search_filter)) |
+            (Employee.first_name.ilike(search_filter)) |
+            (Employee.middle_name.ilike(search_filter)) |
             (Employee.phone.ilike(search_filter)) |
             (Employee.workstation.ilike(search_filter)) |
             (Employee.ad_login.ilike(search_filter)) |
             (Employee.email.ilike(search_filter))
         )
     
-    employees = query.order_by(Employee.full_name).limit(500).all()
+    employees = query.order_by(Employee.last_name, Employee.first_name).limit(500).all()
     
     return templates.TemplateResponse("inventory.html", {
         "request": request,
@@ -243,13 +254,15 @@ async def get_employees(
     if search:
         search_filter = f"%{search}%"
         query = query.filter(
-            (Employee.full_name.ilike(search_filter)) |
+            (Employee.last_name.ilike(search_filter)) |
+            (Employee.first_name.ilike(search_filter)) |
+            (Employee.middle_name.ilike(search_filter)) |
             (Employee.phone.ilike(search_filter)) |
             (Employee.workstation.ilike(search_filter))
         )
     
     total = query.count()
-    employees = query.order_by(Employee.full_name).offset(offset).limit(limit).all()
+    employees = query.order_by(Employee.last_name, Employee.first_name).offset(offset).limit(limit).all()
     
     return {
         "total": total,
@@ -269,6 +282,20 @@ async def get_employees(
         ]
     }
 
+def parse_fio(full_name: str):
+    """Parse Russian FIO format: 'Фамилия Имя Отчество' into parts."""
+    if not full_name:
+        return (None, None, None)
+    parts = full_name.strip().split()
+    if len(parts) == 0:
+        return (None, None, None)
+    elif len(parts) == 1:
+        return (parts[0], None, None)
+    elif len(parts) == 2:
+        return (parts[0], parts[1], None)
+    else:
+        return (parts[0], parts[1], " ".join(parts[2:]))
+
 @app.post("/api/employees")
 async def create_employee(
     full_name: str = Form(...),
@@ -282,8 +309,11 @@ async def create_employee(
     _: None = Depends(verify_auth)
 ):
     """Create new employee."""
+    last_name, first_name, middle_name = parse_fio(full_name)
     employee = Employee(
-        full_name=full_name,
+        last_name=last_name,
+        first_name=first_name,
+        middle_name=middle_name,
         department=department,
         phone=phone,
         workstation=workstation,
@@ -317,7 +347,10 @@ async def update_employee(
     
     # Update only provided fields
     if full_name is not None:
-        employee.full_name = full_name
+        last_name, first_name, middle_name = parse_fio(full_name)
+        employee.last_name = last_name
+        employee.first_name = first_name
+        employee.middle_name = middle_name
     if department is not None:
         employee.department = department
     if phone is not None:

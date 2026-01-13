@@ -4,7 +4,16 @@
 -- Employees/Assets Inventory
 CREATE TABLE IF NOT EXISTS employees (
     id SERIAL PRIMARY KEY,
-    full_name VARCHAR(255) NOT NULL,
+    last_name VARCHAR(100),
+    first_name VARCHAR(100),
+    middle_name VARCHAR(100),
+    full_name VARCHAR(255) GENERATED ALWAYS AS (
+        TRIM(
+            COALESCE(last_name || ' ', '') ||
+            COALESCE(first_name || ' ', '') ||
+            COALESCE(middle_name, '')
+        )
+    ) STORED,  -- Computed column for backward compatibility (can be empty if all parts are NULL)
     department VARCHAR(255),
     phone VARCHAR(50),
     workstation VARCHAR(100),  -- WS number
@@ -14,9 +23,13 @@ CREATE TABLE IF NOT EXISTS employees (
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    -- Note: No name constraint - allow empty records to maintain exact count (621 records)
 );
 
 -- Index for fast search
+CREATE INDEX IF NOT EXISTS idx_employees_last_name ON employees(last_name);
+CREATE INDEX IF NOT EXISTS idx_employees_first_name ON employees(first_name);
+CREATE INDEX IF NOT EXISTS idx_employees_middle_name ON employees(middle_name);
 CREATE INDEX IF NOT EXISTS idx_employees_full_name ON employees(full_name);
 CREATE INDEX IF NOT EXISTS idx_employees_phone ON employees(phone);
 CREATE INDEX IF NOT EXISTS idx_employees_workstation ON employees(workstation);
