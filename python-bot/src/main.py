@@ -9,8 +9,9 @@ from aiogram.types import Message
 from sqlalchemy import select, update
 
 # Core imports
-from src.core.database import async_session, TelegramTopic, UserRole, TelegramUser
+from src.core.database import async_session, TelegramTopic, UserRole, TelegramUser, Employee
 from src.core.middlewares import RoleMiddleware
+from src.handlers.asset_search import handle_asset_search
 
 # Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -77,19 +78,19 @@ async def cmd_set_topic(message: Message):
         
         await session.commit()
 
-@dp.message(F.text.regexp(r"^WS\d+")) # Simple Asset Pattern
-async def handle_asset_query(message: Message):
-    # Route logic: Check if we are in 'assets' topic
-    async with async_session() as session:
-        assets_tid = await get_topic_id(session, 'assets')
-        
-        # If configured, enforce topic
-        if assets_tid and message.message_thread_id != assets_tid:
-            # Optionally ignore or redirect
-            return 
+@dp.message(F.text.regexp(r"^[Ww][Ss][-\s]?\d+")) # Workstation Pattern: WS-123, ws123, WS 123
+async def handle_workstation_query(message: Message):
+    """Handle workstation queries like WS-101"""
+    query = message.text.strip()
+    logger.info(f"Workstation query from {message.from_user.id}: {query}")
+    await handle_asset_search(message, query)
 
-    await message.reply(f"🔍 Searching inventory for asset: {message.text}...")
-    # (Future Phase: Query Postgres Inventory)
+@dp.message(F.text.regexp(r"^\d{3,}$")) # Phone Pattern: 1234 or longer
+async def handle_phone_query(message: Message):
+    """Handle phone number queries"""
+    query = message.text.strip()
+    logger.info(f"Phone query from {message.from_user.id}: {query}")
+    await handle_asset_search(message, query)
 
 @dp.message(Command("cookie"))
 async def cmd_cookie(message: Message):
@@ -114,35 +115,76 @@ async def cmd_cookie(message: Message):
 
 # --- Background Worker (Redis Listener) ---
 async def redis_listener():
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe("bot_alerts", "netadmin_tasks")
-    
-    logger.info("🎧 Redis Listener Active")
-    
-    async for message in pubsub.listen():
-        if message['type'] != 'message':
-            continue
+    """
+    Redis Pub/Sub listener for alerts from Java Agent.
+    Format: "TOPIC_NAME|MESSAGE"
+    """
+    while True:
+        try:
+            pubsub = redis_client.pubsub()
+            await pubsub.subscribe("bot_alerts", "netadmin_tasks")
             
-        channel = message['channel']
-        data = message['data']
-        
-        if channel == "bot_alerts":
-            # Format: "TOPIC_NAME|MESSAGE" or JSON
-            try:
-                topic_name, text = data.split("|", 1)
+            logger.info("🎧 Redis Listener Active - Subscribed to: bot_alerts, netadmin_tasks")
+            
+            async for message in pubsub.listen():
+                if message['type'] != 'message':
+                    continue
+                    
+                channel = message['channel']
+                data = message['data']
                 
-                async with async_session() as session:
-                    thread_id = await get_topic_id(session, topic_name)
+                logger.debug(f"📨 Received message on {channel}: {data[:100]}...")
+                
+                if channel == "bot_alerts":
+                    # Format: "TOPIC_NAME|MESSAGE"
+                    try:
+                        if "|" not in data:
+                            logger.warning(f"Invalid alert format (missing |): {data}")
+                            continue
+                        
+                        topic_name, text = data.split("|", 1)
+                        topic_name = topic_name.strip()
+                        
+                        logger.info(f"🚨 Alert for topic '{topic_name}': {text[:50]}...")
+                        
+                        async with async_session() as session:
+                            thread_id = await get_topic_id(session, topic_name)
+                            
+                            chat_id = os.getenv("TELEGRAM_SUPERGROUP_ID")
+                            
+                            if not chat_id:
+                                logger.error("❌ TELEGRAM_SUPERGROUP_ID not set - cannot send alert")
+                                continue
+                            
+                            # Send to Telegram
+                            try:
+                                await bot.send_message(
+                                    chat_id=chat_id, 
+                                    text=text, 
+                                    message_thread_id=thread_id,
+                                    parse_mode="HTML"
+                                )
+                                logger.info(f"✅ Alert sent to topic '{topic_name}' (thread_id={thread_id})")
+                            except Exception as send_error:
+                                logger.error(f"Failed to send Telegram message: {send_error}")
+                                # Fallback: Send to general chat without topic
+                                try:
+                                    await bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
+                                    logger.info("✅ Alert sent to general chat (fallback)")
+                                except Exception as fallback_error:
+                                    logger.error(f"Fallback send also failed: {fallback_error}")
                     
-                    # Need Supergroup ID from Env
-                    chat_id = os.getenv("TELEGRAM_SUPERGROUP_ID")
-                    
-                    if chat_id:
-                        await bot.send_message(chat_id=chat_id, text=text, message_thread_id=thread_id)
-                    else:
-                        logger.warning("TELEGRAM_SUPERGROUP_ID not set")
-            except Exception as e:
-                logger.error(f"Alert Error: {e}")
+                    except Exception as e:
+                        logger.error(f"❌ Alert processing error: {e}", exc_info=True)
+                
+                elif channel == "netadmin_tasks":
+                    # Handle other task types if needed
+                    logger.info(f"📋 Task received: {data[:100]}...")
+        
+        except Exception as e:
+            logger.error(f"❌ Redis Listener error: {e}", exc_info=True)
+            logger.info("🔄 Reconnecting in 5 seconds...")
+            await asyncio.sleep(5)
 
 async def main():
     # Start Redis Listener

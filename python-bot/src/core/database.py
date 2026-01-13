@@ -41,6 +41,21 @@ class TelegramTopic(Base):
     thread_id = Column(Integer, nullable=False)
     description = Column(String)
 
+class Employee(Base):
+    __tablename__ = 'employees'
+    
+    id = Column(Integer, primary_key=True)
+    full_name = Column(String, nullable=False)
+    department = Column(String)
+    phone = Column(String)
+    workstation = Column(String)
+    ad_login = Column(String)
+    email = Column(String)
+    notes = Column(String)
+    is_active = Column(Integer, default=1)  # SQLite uses integers for booleans
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
 # DB Setup
 POSTGRES_USER = os.getenv("POSTGRES_USER", "netadmin")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "netadmin_secret")
