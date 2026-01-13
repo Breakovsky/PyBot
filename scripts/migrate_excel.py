@@ -4,10 +4,13 @@ Excel to PostgreSQL Migration Script
 Migrates employee/asset data from legacy Excel file to NetAdmin v3.0 DB
 
 Usage:
-    python scripts/migrate_excel.py --file path/to/all_pc.xlsx --password <password>
+    python scripts/migrate_excel.py --file path/to/all_pc.xlsx [--password <password>]
+    
+    If --password not provided, reads from EXCEL_PASS environment variable.
     
 Environment Variables:
     POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST
+    EXCEL_PASS - Excel file password (optional if --password provided)
 """
 
 import argparse
@@ -16,9 +19,17 @@ import os
 import sys
 from pathlib import Path
 import io
+from dotenv import load_dotenv
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# Load .env file
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path)
+    logger = logging.getLogger(__name__)
+    logger.info(f"Loaded environment from: {env_path}")
 
 import openpyxl
 import msoffcrypto
@@ -131,45 +142,65 @@ def migrate_to_db(employees, conn, mode="insert"):
     
     # Ensure inventory schema exists
     logger.info("Checking database schema...")
-    with open("config/init_inventory.sql", "r") as f:
-        cursor.execute(f.read())
-    conn.commit()
+    sql_path = Path(__file__).parent.parent / "config" / "init_inventory.sql"
+    if sql_path.exists():
+        with open(sql_path, "r") as f:
+            cursor.execute(f.read())
+        conn.commit()
+        logger.info("✅ Database schema verified")
+    else:
+        logger.warning(f"⚠️ Schema file not found: {sql_path}, assuming tables exist")
     
     inserted = 0
     updated = 0
     skipped = 0
     
     if mode == "upsert":
-        # UPSERT: Update if phone or workstation matches
-        query = """
-            INSERT INTO employees (full_name, department, phone, workstation, ad_login, email, notes, updated_at)
-            VALUES (%(full_name)s, %(department)s, %(phone)s, %(workstation)s, %(ad_login)s, %(email)s, %(notes)s, NOW())
-            ON CONFLICT (phone) 
-            DO UPDATE SET 
-                full_name = EXCLUDED.full_name,
-                department = EXCLUDED.department,
-                workstation = EXCLUDED.workstation,
-                ad_login = EXCLUDED.ad_login,
-                email = EXCLUDED.email,
-                notes = EXCLUDED.notes,
-                updated_at = NOW()
-        """
-        
+        # UPSERT: Check if exists by phone or workstation, then UPDATE or INSERT
         for emp in employees:
             try:
-                cursor.execute(query, emp)
-                if cursor.rowcount > 0:
-                    if "ON CONFLICT" in cursor.statusmessage or cursor.rowcount == 2:
-                        updated += 1
-                    else:
-                        inserted += 1
+                # Check if employee exists (by phone or workstation)
+                check_query = """
+                    SELECT id FROM employees 
+                    WHERE (phone = %(phone)s AND %(phone)s IS NOT NULL AND %(phone)s != '')
+                       OR (workstation = %(workstation)s AND %(workstation)s IS NOT NULL AND %(workstation)s != '')
+                    LIMIT 1
+                """
+                cursor.execute(check_query, emp)
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # UPDATE existing
+                    update_query = """
+                        UPDATE employees 
+                        SET full_name = %(full_name)s,
+                            department = %(department)s,
+                            phone = %(phone)s,
+                            workstation = %(workstation)s,
+                            ad_login = %(ad_login)s,
+                            email = %(email)s,
+                            notes = %(notes)s,
+                            updated_at = NOW()
+                        WHERE id = %(id)s
+                    """
+                    emp['id'] = existing[0]
+                    cursor.execute(update_query, emp)
+                    updated += 1
+                else:
+                    # INSERT new
+                    insert_query = """
+                        INSERT INTO employees (full_name, department, phone, workstation, ad_login, email, notes, updated_at)
+                        VALUES (%(full_name)s, %(department)s, %(phone)s, %(workstation)s, %(ad_login)s, %(email)s, %(notes)s, NOW())
+                    """
+                    cursor.execute(insert_query, emp)
+                    inserted += 1
+                
+                conn.commit()
             except Exception as e:
-                logger.error(f"Failed to upsert employee {emp['full_name']}: {e}")
+                logger.error(f"Failed to upsert employee {emp.get('full_name', 'Unknown')}: {e}")
                 skipped += 1
                 conn.rollback()
                 continue
-        
-        conn.commit()
     
     else:  # insert mode
         # Simple INSERT, skip duplicates
@@ -203,16 +234,22 @@ def migrate_to_db(employees, conn, mode="insert"):
 def main():
     parser = argparse.ArgumentParser(description="Migrate Excel data to PostgreSQL")
     parser.add_argument("--file", required=True, help="Path to Excel file")
-    parser.add_argument("--password", required=True, help="Excel file password")
+    parser.add_argument("--password", help="Excel file password (or use EXCEL_PASS env var)")
     parser.add_argument("--mode", choices=["insert", "upsert"], default="upsert",
                        help="Migration mode: insert (skip duplicates) or upsert (update existing)")
     parser.add_argument("--dry-run", action="store_true", help="Parse only, don't write to DB")
     
     args = parser.parse_args()
     
+    # Get password from args or env
+    password = args.password or os.getenv("EXCEL_PASS")
+    if not password:
+        logger.error("❌ Excel password required! Provide --password or set EXCEL_PASS in .env")
+        sys.exit(1)
+    
     # Load Excel
     logger.info(f"Loading Excel file: {args.file}")
-    wb = load_protected_excel(args.file, args.password)
+    wb = load_protected_excel(args.file, password)
     if not wb:
         logger.error("Failed to load Excel file")
         sys.exit(1)

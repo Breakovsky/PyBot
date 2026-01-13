@@ -3,4 +3,5 @@ openpyxl>=3.1.2
 msoffcrypto-tool>=5.0.1
 psycopg2-binary>=2.9.9
 python-dotenv>=1.0.0
+msoffcrypto>=4.11.0
 
