@@ -1,9 +1,19 @@
 <!DOCTYPE html>
-<html lang="ru" x-data="{ darkMode: window.matchMedia('(prefers-color-scheme: dark)').matches }" :class="{ 'dark': darkMode }">
+<html lang="ru" x-data="inventoryApp()" :class="{ 'dark': darkMode }">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Cockpit - NetAdmin v3.0</title>
+    
+    <!-- Instant Dark Mode Script (NO LAG!) -->
+    <script>
+        // Load theme BEFORE any rendering
+        const theme = localStorage.getItem('theme') || 
+                     (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+        }
+    </script>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -13,91 +23,37 @@
     
     <!-- Inter Font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    
-    <!-- Heroicons -->
-    <script src="https://unpkg.com/@heroicons/vue@2.0.13/dist/outline.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     
     <style>
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-        }
+        * { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
         
-        /* Custom scrollbar */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
+        /* Remove ALL transitions from theme-dependent properties */
+        .no-transition { transition: none !important; }
         
-        ::-webkit-scrollbar-track {
-            background: transparent;
-        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .dark ::-webkit-scrollbar-thumb { background: #475569; }
         
-        ::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 4px;
-        }
-        
-        .dark ::-webkit-scrollbar-thumb {
-            background: #475569;
-        }
-        
-        /* Smooth transitions */
-        * {
-            transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
-        }
-        
-        /* Side drawer animation */
+        /* Smooth Drawer Animation */
         @keyframes slide-in {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
         }
         
-        .slide-in {
-            animation: slide-in 0.3s ease-out;
-        }
+        .slide-in { animation: slide-in 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         
-        /* Toast animation */
-        @keyframes toast-in {
-            from {
-                transform: translateY(-100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateY(0);
-                opacity: 1;
-            }
-        }
-        
-        .toast-in {
-            animation: toast-in 0.3s ease-out;
-        }
-        
-        /* Dense mode */
-        .dense-row {
-            height: 36px;
-        }
-        
-        /* Status dot pulse */
+        /* Pulse Animation for Status Dots */
         @keyframes pulse-dot {
-            0%, 100% {
-                opacity: 1;
-            }
-            50% {
-                opacity: 0.5;
-            }
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
         }
+        .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
         
-        .pulse-dot {
-            animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
+        /* Hide scrollbar on body during initial load */
+        body.loading { overflow: hidden; }
     </style>
     
     <script>
@@ -108,6 +64,7 @@
                     colors: {
                         primary: {
                             50: '#f0f9ff',
+                            100: '#e0f2fe',
                             500: '#0ea5e9',
                             600: '#0284c7',
                             700: '#0369a1',
@@ -118,25 +75,24 @@
         }
     </script>
 </head>
-<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen" 
-      x-data="inventoryApp()" 
-      @keydown.meta.k.prevent="searchOpen = true"
-      @keydown.ctrl.k.prevent="searchOpen = true">
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen transition-colors duration-0">
     
     <!-- Top Navigation Bar -->
-    <nav class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40">
+    <nav class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 shadow-sm">
         <div class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-16">
                 <!-- Logo & Title -->
                 <div class="flex items-center space-x-4">
                     <div class="flex items-center">
                         <svg class="w-8 h-8 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"></path>
                         </svg>
                         <span class="ml-3 text-xl font-bold">Admin Cockpit</span>
                     </div>
-                    <div class="hidden md:flex items-center text-sm text-gray-500 dark:text-gray-400">
-                        <span class="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-700">{{ employees|length }} employees</span>
+                    <div class="hidden md:flex items-center">
+                        <span class="px-3 py-1 text-sm rounded-full bg-primary-100 dark:bg-primary-900 text-primary-700 dark:text-primary-300">
+                            <span x-text="filteredEmployees.length"></span> сотрудников
+                        </span>
                     </div>
                 </div>
                 
@@ -147,8 +103,8 @@
                             type="text" 
                             x-model="searchQuery"
                             @input="filterEmployees"
-                            placeholder="Search employees... (⌘K)"
-                            class="w-full px-4 py-2 pl-10 pr-4 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                            placeholder="Поиск сотрудников... (⌘K)"
+                            class="w-full px-4 py-2 pl-10 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-colors">
                         <svg class="absolute left-3 top-2.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
                         </svg>
@@ -156,16 +112,9 @@
                 </div>
                 
                 <!-- Actions -->
-                <div class="flex items-center space-x-4">
-                    <!-- Dense Mode Toggle -->
-                    <button @click="denseMode = !denseMode" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700" title="Toggle Dense Mode">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
-                        </svg>
-                    </button>
-                    
-                    <!-- Dark Mode Toggle -->
-                    <button @click="darkMode = !darkMode" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                <div class="flex items-center space-x-3">
+                    <!-- Dark Mode Toggle (INSTANT!) -->
+                    <button @click="toggleTheme()" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" title="Переключить тему">
                         <svg x-show="!darkMode" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
                         </svg>
@@ -175,7 +124,7 @@
                     </button>
                     
                     <!-- Dashboard Link -->
-                    <a href="/" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                    <a href="/" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
                         Dashboard
                     </a>
                 </div>
@@ -186,64 +135,57 @@
     <!-- Main Content -->
     <div class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         
-        <!-- Filters & Actions Bar -->
+        <!-- Filters Bar -->
         <div class="mb-4 flex items-center justify-between">
             <div class="flex items-center space-x-4">
-                <!-- Column Sorting -->
-                <div class="flex items-center space-x-2 text-sm">
-                    <span class="text-gray-500 dark:text-gray-400">Sort by:</span>
-                    <select @change="window.location.href = `/inventory?sort=${$event.target.value}&order=asc`" 
-                            class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm">
-                        <option value="last_name" {{ 'selected' if sort == 'last_name' else '' }}>Name</option>
-                        <option value="company" {{ 'selected' if sort == 'company' else '' }}>Company</option>
-                        <option value="department" {{ 'selected' if sort == 'department' else '' }}>Department</option>
-                        <option value="workstation" {{ 'selected' if sort == 'workstation' else '' }}>Workstation</option>
-                    </select>
-                </div>
-                
-                <!-- Filters (Company, Status) -->
+                <!-- Company Filter -->
                 <div class="flex items-center space-x-2">
-                    <button @click="filterCompany = filterCompany === 'all' ? 'MOBI' : (filterCompany === 'MOBI' ? 'EGR' : 'all')"
-                            class="px-3 py-1.5 rounded-lg border text-sm"
-                            :class="filterCompany === 'all' ? 'border-gray-300 dark:border-gray-600' : 'border-primary-500 bg-primary-50 dark:bg-primary-900'">
-                        <span x-text="filterCompany === 'all' ? 'All Companies' : filterCompany"></span>
+                    <button @click="filterCompany = 'all'" 
+                            :class="filterCompany === 'all' ? 'bg-primary-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
+                            class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">
+                        Все
+                    </button>
+                    <button @click="filterCompany = 'MOBI'" 
+                            :class="filterCompany === 'MOBI' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
+                            class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">
+                        MOBI
+                    </button>
+                    <button @click="filterCompany = 'EGR'" 
+                            :class="filterCompany === 'EGR' ? 'bg-purple-600 text-white' : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'"
+                            class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors">
+                        EGR
                     </button>
                 </div>
             </div>
             
-            <!-- Results Count -->
+            <!-- Results Counter -->
             <div class="text-sm text-gray-500 dark:text-gray-400">
-                Showing <span x-text="filteredEmployees.length"></span> of {{ employees|length }}
+                Показано <span x-text="filteredEmployees.length"></span> из {{ employees|length }}
             </div>
         </div>
         
         <!-- The Super Grid -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
             <div class="overflow-x-auto">
                 <table class="w-full">
                     <thead class="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-16">
                         <tr>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-12">#</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Company</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Department</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Location</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">#</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Имя</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Компания</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Отдел</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Локация</th>
                             <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">WS</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Phone</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Device</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Software</th>
-                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24">Actions</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Телефон</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Устройство</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-center">Софт</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Действия</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
-                        {% if employees %}
                         <template x-for="(emp, index) in filteredEmployees" :key="emp.id">
-                            <tr 
-                                :class="[
-                                    denseMode ? 'dense-row' : '',
-                                    !emp.is_active ? 'opacity-50' : '',
-                                    'hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors'
-                                ]"
+                            <tr class="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
+                                :class="{ 'opacity-50': !emp.is_active }"
                                 @click="openDrawer(emp)">
                                 
                                 <!-- ID -->
@@ -252,19 +194,23 @@
                                 <!-- Name with Avatar -->
                                 <td class="px-4 py-3">
                                     <div class="flex items-center">
-                                        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center">
-                                            <span class="text-xs font-medium text-primary-700 dark:text-primary-300" x-text="getInitials(emp.full_name)"></span>
+                                        <div class="flex-shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center">
+                                            <span class="text-sm font-bold text-white" x-text="getInitials(emp.full_name)"></span>
                                         </div>
                                         <div class="ml-3">
-                                            <div class="text-sm font-medium text-gray-900 dark:text-gray-100" x-text="emp.full_name"></div>
+                                            <div class="text-sm font-semibold text-gray-900 dark:text-gray-100" x-text="emp.full_name"></div>
                                         </div>
                                     </div>
                                 </td>
                                 
                                 <!-- Company -->
                                 <td class="px-4 py-3">
-                                    <span class="px-2 py-1 text-xs font-medium rounded-full"
-                                          :class="emp.company === 'MOBI' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'"
+                                    <span class="px-2.5 py-1 text-xs font-semibold rounded-full"
+                                          :class="{
+                                              'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200': emp.company === 'MOBI',
+                                              'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200': emp.company === 'EGR',
+                                              'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300': !emp.company
+                                          }"
                                           x-text="emp.company || 'N/A'"></span>
                                 </td>
                                 
@@ -281,33 +227,35 @@
                                 
                                 <!-- Phone -->
                                 <td class="px-4 py-3">
-                                    <div class="flex items-center space-x-2">
+                                    <div class="flex items-center space-x-1">
                                         <span class="text-sm text-gray-600 dark:text-gray-300" x-text="emp.internal_phone || '—'"></span>
                                         <span x-show="emp.phone_type && emp.phone_type !== 'NONE'" 
-                                              class="text-xs text-gray-400"
-                                              x-text="emp.phone_type === 'TA' ? '📞' : '💻'"></span>
+                                              class="text-xs"
+                                              x-text="emp.phone_type === 'TA' ? '📞' : (emp.phone_type === 'MicroSIP' ? '💻' : '')"></span>
                                     </div>
                                 </td>
                                 
-                                <!-- Device Type -->
+                                <!-- Device -->
                                 <td class="px-4 py-3">
-                                    <span x-text="getDeviceIcon(emp.device_type)"></span>
-                                    <span class="ml-1 text-sm text-gray-600 dark:text-gray-300" x-text="emp.device_type || 'N/A'"></span>
+                                    <div class="flex items-center space-x-2">
+                                        <span x-text="getDeviceIcon(emp.device_type)"></span>
+                                        <span class="text-sm text-gray-600 dark:text-gray-300" x-text="emp.device_type || 'N/A'"></span>
+                                    </div>
                                 </td>
                                 
                                 <!-- Software Status -->
                                 <td class="px-4 py-3">
-                                    <div class="flex items-center space-x-2">
-                                        <div class="flex items-center" :title="'AD: ' + (emp.has_ad ? 'Yes' : 'No')">
-                                            <span class="w-2 h-2 rounded-full" 
+                                    <div class="flex items-center justify-center space-x-2">
+                                        <div :title="'AD: ' + (emp.has_ad ? 'Да' : 'Нет')">
+                                            <span class="w-2.5 h-2.5 rounded-full inline-block" 
                                                   :class="emp.has_ad ? 'bg-green-500 pulse-dot' : 'bg-gray-300 dark:bg-gray-600'"></span>
                                         </div>
-                                        <div class="flex items-center" :title="'DrWeb: ' + (emp.has_drweb ? 'Yes' : 'No')">
-                                            <span class="w-2 h-2 rounded-full" 
+                                        <div :title="'DrWeb: ' + (emp.has_drweb ? 'Да' : 'Нет')">
+                                            <span class="w-2.5 h-2.5 rounded-full inline-block" 
                                                   :class="emp.has_drweb ? 'bg-green-500 pulse-dot' : 'bg-gray-300 dark:bg-gray-600'"></span>
                                         </div>
-                                        <div class="flex items-center" :title="'Zabbix: ' + (emp.has_zabbix ? 'Yes' : 'No')">
-                                            <span class="w-2 h-2 rounded-full" 
+                                        <div :title="'Zabbix: ' + (emp.has_zabbix ? 'Да' : 'Нет')">
+                                            <span class="w-2.5 h-2.5 rounded-full inline-block" 
                                                   :class="emp.has_zabbix ? 'bg-green-500 pulse-dot' : 'bg-gray-300 dark:bg-gray-600'"></span>
                                         </div>
                                     </div>
@@ -316,30 +264,30 @@
                                 <!-- Actions -->
                                 <td class="px-4 py-3">
                                     <button @click.stop="openDrawer(emp)" 
-                                            class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 text-sm font-medium">
+                                            class="px-3 py-1.5 text-xs font-medium text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 hover:bg-primary-50 dark:hover:bg-primary-900/30 rounded-lg transition-colors">
                                         View
                                     </button>
                                 </td>
                             </tr>
                         </template>
-                        {% else %}
-                        <tr>
+                        
+                        <!-- Empty State -->
+                        <tr x-show="filteredEmployees.length === 0">
                             <td colspan="10" class="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
                                 <svg class="mx-auto w-12 h-12 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
                                 </svg>
-                                <p class="text-lg font-medium">No employees found</p>
-                                <p class="mt-1">Run migration script or add employees manually</p>
+                                <p class="text-lg font-medium">Ничего не найдено</p>
+                                <p class="mt-1">Попробуйте изменить параметры поиска</p>
                             </td>
                         </tr>
-                        {% endif %}
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
     
-    <!-- Side Drawer (Expanded View) -->
+    <!-- Side Drawer (View/Edit Mode) -->
     <div x-show="drawerOpen" 
          x-transition:enter="transition ease-out duration-300"
          x-transition:enter-start="opacity-0"
@@ -348,7 +296,8 @@
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0"
          class="fixed inset-0 bg-black bg-opacity-50 z-50"
-         @click="drawerOpen = false">
+         @click="drawerOpen = false"
+         style="display: none;">
         
         <div x-show="drawerOpen"
              x-transition:enter="transition ease-out duration-300 transform"
@@ -364,42 +313,50 @@
             <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 z-10">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center space-x-4">
-                        <div class="w-12 h-12 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center">
-                            <span class="text-lg font-bold text-primary-700 dark:text-primary-300" x-text="selectedEmployee ? getInitials(selectedEmployee.full_name) : ''"></span>
+                        <div class="w-12 h-12 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center">
+                            <span class="text-lg font-bold text-white" x-text="selectedEmployee ? getInitials(selectedEmployee.full_name) : ''"></span>
                         </div>
                         <div>
-                            <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100" x-text="selectedEmployee?.full_name || 'Employee'"></h2>
+                            <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100" x-text="selectedEmployee?.full_name || 'Сотрудник'"></h2>
                             <p class="text-sm text-gray-500 dark:text-gray-400" x-text="selectedEmployee?.department || 'N/A'"></p>
                         </div>
                     </div>
-                    <button @click="drawerOpen = false" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                        </svg>
-                    </button>
+                    <div class="flex items-center space-x-2">
+                        <!-- Edit/Save Toggle -->
+                        <button @click="editMode = !editMode" 
+                                class="px-4 py-2 rounded-lg font-medium transition-colors"
+                                :class="editMode ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-primary-600 hover:bg-primary-700 text-white'">
+                            <span x-text="editMode ? '💾 Сохранить' : '✏️ Редактировать'"></span>
+                        </button>
+                        <button @click="drawerOpen = false" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 
                 <!-- Tabs -->
                 <div class="flex space-x-4 mt-4 border-b border-gray-200 dark:border-gray-700">
+                    <button @click="activeTab = 'general'" 
+                            :class="activeTab === 'general' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                            class="pb-2 px-1 border-b-2 font-medium text-sm transition-colors">
+                        Общее
+                    </button>
                     <button @click="activeTab = 'hardware'" 
                             :class="activeTab === 'hardware' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                             class="pb-2 px-1 border-b-2 font-medium text-sm transition-colors">
-                        Hardware
+                        Железо
                     </button>
                     <button @click="activeTab = 'software'" 
                             :class="activeTab === 'software' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                             class="pb-2 px-1 border-b-2 font-medium text-sm transition-colors">
-                        Software
-                    </button>
-                    <button @click="activeTab = 'access'" 
-                            :class="activeTab === 'access' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
-                            class="pb-2 px-1 border-b-2 font-medium text-sm transition-colors">
-                        Access
+                        Софт
                     </button>
                     <button @click="activeTab = 'notes'" 
                             :class="activeTab === 'notes' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                             class="pb-2 px-1 border-b-2 font-medium text-sm transition-colors">
-                        Notes
+                        Заметки
                     </button>
                 </div>
             </div>
@@ -407,52 +364,96 @@
             <!-- Drawer Content -->
             <div class="px-6 py-6">
                 
+                <!-- General Tab -->
+                <div x-show="activeTab === 'general'" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="col-span-2">
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">ФИО</label>
+                            <input x-model="selectedEmployee.full_name" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Компания</label>
+                            <input x-model="selectedEmployee.company" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Отдел</label>
+                            <input x-model="selectedEmployee.department" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Локация</label>
+                            <input x-model="selectedEmployee.location" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Email</label>
+                            <input x-model="selectedEmployee.email" :disabled="!editMode" type="email"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Телефон</label>
+                            <input x-model="selectedEmployee.internal_phone" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Workstation</label>
+                            <input x-model="selectedEmployee.workstation" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
+                        </div>
+                        
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">AD Login</label>
+                            <input x-model="selectedEmployee.ad_login" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Hardware Tab -->
                 <div x-show="activeTab === 'hardware'" class="space-y-4">
                     <div class="grid grid-cols-2 gap-4">
-                        <!-- Device Type -->
-                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Device Type</div>
-                            <div class="flex items-center space-x-2">
-                                <span x-text="getDeviceIcon(selectedEmployee?.device_type)"></span>
-                                <span class="font-medium" x-text="selectedEmployee?.device_type || 'N/A'"></span>
-                            </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Устройство</label>
+                            <input x-model="selectedEmployee.device_type" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
                         </div>
                         
-                        <!-- Workstation -->
-                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Workstation</div>
-                            <code class="text-sm font-mono" x-text="selectedEmployee?.workstation || 'N/A'"></code>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">RAM</label>
+                            <input x-model="selectedEmployee.specs_ram" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
                         </div>
                         
-                        <!-- CPU -->
-                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg col-span-2">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🖥 CPU</div>
-                            <div class="font-medium text-sm" x-text="selectedEmployee?.specs_cpu || 'N/A'"></div>
+                        <div class="col-span-2">
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">CPU</label>
+                            <input x-model="selectedEmployee.specs_cpu" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
                         </div>
                         
-                        <!-- GPU -->
-                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🎮 GPU</div>
-                            <div class="font-medium text-sm" x-text="selectedEmployee?.specs_gpu || 'N/A'"></div>
+                        <div class="col-span-2">
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">GPU</label>
+                            <input x-model="selectedEmployee.specs_gpu" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
                         </div>
                         
-                        <!-- RAM -->
-                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">💾 RAM</div>
-                            <div class="font-medium text-sm" x-text="selectedEmployee?.specs_ram || 'N/A'"></div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Монитор</label>
+                            <input x-model="selectedEmployee.monitor" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
                         </div>
                         
-                        <!-- Monitor -->
-                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🖥️ Monitor</div>
-                            <div class="font-medium text-sm" x-text="selectedEmployee?.monitor || 'N/A'"></div>
-                        </div>
-                        
-                        <!-- UPS -->
-                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🔋 UPS</div>
-                            <div class="font-medium text-sm" x-text="selectedEmployee?.ups || 'N/A'"></div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">UPS</label>
+                            <input x-model="selectedEmployee.ups" :disabled="!editMode"
+                                   class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50">
                         </div>
                     </div>
                 </div>
@@ -470,12 +471,13 @@
                                 </div>
                                 <div>
                                     <div class="font-medium">Active Directory</div>
-                                    <div class="text-sm text-gray-500 dark:text-gray-400" x-text="selectedEmployee?.ad_login || 'Not configured'"></div>
+                                    <div class="text-sm text-gray-500 dark:text-gray-400" x-text="selectedEmployee?.ad_login || 'Не настроено'"></div>
                                 </div>
                             </div>
-                            <div class="flex items-center">
-                                <span :class="selectedEmployee?.has_ad ? 'text-green-600' : 'text-gray-400'" class="text-2xl" x-text="selectedEmployee?.has_ad ? '✓' : '✗'"></span>
-                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" x-model="selectedEmployee.has_ad" :disabled="!editMode" class="sr-only peer">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                            </label>
                         </div>
                         
                         <!-- DrWeb Toggle -->
@@ -488,12 +490,13 @@
                                 </div>
                                 <div>
                                     <div class="font-medium">Dr.Web Antivirus</div>
-                                    <div class="text-sm text-gray-500 dark:text-gray-400">Antivirus protection</div>
+                                    <div class="text-sm text-gray-500 dark:text-gray-400">Антивирусная защита</div>
                                 </div>
                             </div>
-                            <div class="flex items-center">
-                                <span :class="selectedEmployee?.has_drweb ? 'text-green-600' : 'text-gray-400'" class="text-2xl" x-text="selectedEmployee?.has_drweb ? '✓' : '✗'"></span>
-                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" x-model="selectedEmployee.has_drweb" :disabled="!editMode" class="sr-only peer">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-green-300 dark:peer-focus:ring-green-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-green-600"></div>
+                            </label>
                         </div>
                         
                         <!-- Zabbix Toggle -->
@@ -506,80 +509,34 @@
                                 </div>
                                 <div>
                                     <div class="font-medium">Zabbix Monitoring</div>
-                                    <div class="text-sm text-gray-500 dark:text-gray-400">System monitoring</div>
+                                    <div class="text-sm text-gray-500 dark:text-gray-400">Мониторинг системы</div>
                                 </div>
                             </div>
-                            <div class="flex items-center">
-                                <span :class="selectedEmployee?.has_zabbix ? 'text-green-600' : 'text-gray-400'" class="text-2xl" x-text="selectedEmployee?.has_zabbix ? '✓' : '✗'"></span>
-                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" x-model="selectedEmployee.has_zabbix" :disabled="!editMode" class="sr-only peer">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-purple-600"></div>
+                            </label>
                         </div>
-                    </div>
-                </div>
-                
-                <!-- Access Tab -->
-                <div x-show="activeTab === 'access'" class="space-y-4">
-                    <div class="space-y-3">
-                        <!-- Email -->
-                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">📧 Email</div>
-                            <div class="font-medium" x-text="selectedEmployee?.email || 'N/A'"></div>
-                        </div>
-                        
-                        <!-- AD Login -->
-                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🔑 AD Login</div>
-                            <code class="text-sm font-mono" x-text="selectedEmployee?.ad_login || 'N/A'"></code>
-                        </div>
-                        
-                        <!-- Phone -->
-                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">📞 Internal Phone</div>
-                            <div class="flex items-center space-x-2">
-                                <span class="font-medium" x-text="selectedEmployee?.internal_phone || 'N/A'"></span>
-                                <span class="text-xs text-gray-400" x-text="selectedEmployee?.phone_type && selectedEmployee.phone_type !== 'NONE' ? `(${selectedEmployee.phone_type})` : ''"></span>
-                            </div>
-                        </div>
-                        
-                        <!-- Location -->
-                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">📍 Location</div>
-                            <div class="font-medium" x-text="selectedEmployee?.location || 'N/A'"></div>
-                        </div>
-                    </div>
-                    
-                    <!-- Action Buttons -->
-                    <div class="mt-6 space-y-3">
-                        <button class="w-full px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
-                            </svg>
-                            <span>Reset Password</span>
-                        </button>
-                        
-                        <button class="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
-                            </svg>
-                            <span>Print Onboarding Sheet</span>
-                        </button>
                     </div>
                 </div>
                 
                 <!-- Notes Tab -->
                 <div x-show="activeTab === 'notes'" class="space-y-4">
-                    <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg min-h-[200px]">
-                        <p class="text-sm text-gray-600 dark:text-gray-300 whitespace-pre-wrap" x-text="selectedEmployee?.notes || 'No notes available'"></p>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Заметки</label>
+                        <textarea x-model="selectedEmployee.notes" :disabled="!editMode" rows="10"
+                                  class="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 disabled:opacity-50"></textarea>
                     </div>
                 </div>
             </div>
         </div>
     </div>
     
-    <!-- Floating Action Button (FAB) -->
-    <button @click="showAddModal = true" 
-            class="fixed bottom-8 right-8 w-14 h-14 bg-primary-600 hover:bg-primary-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-40">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+    <!-- FAB (Floating Action Button) -->
+    <button @click="openAddModal()" 
+            class="fixed bottom-8 right-8 w-16 h-16 bg-gradient-to-br from-primary-500 to-primary-700 hover:from-primary-600 hover:to-primary-800 text-white rounded-full shadow-2xl hover:shadow-primary-500/50 transition-all transform hover:scale-110 flex items-center justify-center z-40">
+        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
         </svg>
     </button>
     
@@ -591,7 +548,8 @@
          x-transition:leave="transition ease-in duration-200 transform"
          x-transition:leave-start="translate-y-0 opacity-100"
          x-transition:leave-end="-translate-y-2 opacity-0"
-         class="fixed top-20 right-4 z-50 max-w-sm">
+         class="fixed top-20 right-4 z-50 max-w-sm"
+         style="display: none;">
         <div class="rounded-lg shadow-lg overflow-hidden"
              :class="toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'">
             <div class="p-4 flex items-center space-x-3">
@@ -611,22 +569,83 @@
                 employees: {{ employees | tojson }},
                 filteredEmployees: [],
                 searchQuery: '',
-                denseMode: false,
+                darkMode: localStorage.getItem('theme') === 'dark' || (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches),
                 drawerOpen: false,
                 selectedEmployee: null,
-                activeTab: 'hardware',
+                editMode: false,
+                activeTab: 'general',
                 filterCompany: 'all',
                 toast: {
                     show: false,
                     message: '',
                     type: 'success'
                 },
-                searchOpen: false,
-                showAddModal: false,
                 
                 // Initialize
                 init() {
                     this.filteredEmployees = this.employees;
+                    
+                    // Apply theme
+                    if (this.darkMode) {
+                        document.documentElement.classList.add('dark');
+                    }
+                    
+                    // Remove loading class
+                    document.body.classList.remove('loading');
+                },
+                
+                // Theme Toggle (INSTANT!)
+                toggleTheme() {
+                    this.darkMode = !this.darkMode;
+                    const theme = this.darkMode ? 'dark' : 'light';
+                    
+                    // Apply immediately
+                    if (this.darkMode) {
+                        document.documentElement.classList.add('dark');
+                    } else {
+                        document.documentElement.classList.remove('dark');
+                    }
+                    
+                    // Save to localStorage
+                    localStorage.setItem('theme', theme);
+                },
+                
+                // Filter Employees
+                filterEmployees() {
+                    let results = this.employees;
+                    
+                    // Text search
+                    if (this.searchQuery) {
+                        const query = this.searchQuery.toLowerCase();
+                        results = results.filter(emp => 
+                            (emp.full_name && emp.full_name.toLowerCase().includes(query)) ||
+                            (emp.workstation && emp.workstation.toLowerCase().includes(query)) ||
+                            (emp.internal_phone && emp.internal_phone.includes(query)) ||
+                            (emp.email && emp.email.toLowerCase().includes(query)) ||
+                            (emp.department && emp.department.toLowerCase().includes(query)) ||
+                            (emp.company && emp.company.toLowerCase().includes(query))
+                        );
+                    }
+                    
+                    // Company filter
+                    if (this.filterCompany !== 'all') {
+                        results = results.filter(emp => emp.company === this.filterCompany);
+                    }
+                    
+                    this.filteredEmployees = results;
+                },
+                
+                // Open Drawer
+                openDrawer(employee) {
+                    this.selectedEmployee = JSON.parse(JSON.stringify(employee)); // Deep copy
+                    this.drawerOpen = true;
+                    this.editMode = false;
+                    this.activeTab = 'general';
+                },
+                
+                // Open Add Modal
+                openAddModal() {
+                    this.showToast('Функция добавления сотрудника в разработке', 'error');
                 },
                 
                 // Helpers
@@ -650,35 +669,6 @@
                     return icons[type] || '📦';
                 },
                 
-                filterEmployees() {
-                    let results = this.employees;
-                    
-                    // Text search
-                    if (this.searchQuery) {
-                        const query = this.searchQuery.toLowerCase();
-                        results = results.filter(emp => 
-                            (emp.full_name && emp.full_name.toLowerCase().includes(query)) ||
-                            (emp.workstation && emp.workstation.toLowerCase().includes(query)) ||
-                            (emp.internal_phone && emp.internal_phone.includes(query)) ||
-                            (emp.email && emp.email.toLowerCase().includes(query)) ||
-                            (emp.department && emp.department.toLowerCase().includes(query))
-                        );
-                    }
-                    
-                    // Company filter
-                    if (this.filterCompany !== 'all') {
-                        results = results.filter(emp => emp.company === this.filterCompany);
-                    }
-                    
-                    this.filteredEmployees = results;
-                },
-                
-                openDrawer(employee) {
-                    this.selectedEmployee = employee;
-                    this.drawerOpen = true;
-                    this.activeTab = 'hardware';
-                },
-                
                 showToast(message, type = 'success') {
                     this.toast = { show: true, message, type };
                     setTimeout(() => {
@@ -688,5 +678,8 @@
             }
         }
     </script>
+</body>
+</html>
+
 </body>
 </html>

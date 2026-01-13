@@ -522,7 +522,7 @@ async def inventory_page(
         # Default sort by last_name, first_name
         query = query.order_by(Employee.last_name, Employee.first_name)
     
-    employees = query.limit(500).all()
+    employees = query.limit(2000).all()
     
     # Convert to JSON-serializable format for Alpine.js
     employees_data = []
