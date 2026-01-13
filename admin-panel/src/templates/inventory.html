@@ -1,673 +1,690 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="ru" x-data="{ darkMode: window.matchMedia('(prefers-color-scheme: dark)').matches }" :class="{ 'dark': darkMode }">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Inventory Management V2.0 - NetAdmin</title>
+    <title>Admin Cockpit - NetAdmin v3.0</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    
+    <!-- Inter Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Heroicons -->
+    <script src="https://unpkg.com/@heroicons/vue@2.0.13/dist/outline.js"></script>
+    
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: #f5f5f5;
-            padding: 20px;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         }
         
-        .header {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
         }
         
-        .header h1 {
-            font-size: 24px;
-            color: #333;
+        ::-webkit-scrollbar-track {
+            background: transparent;
         }
         
-        .header-actions {
-            display: flex;
-            gap: 10px;
-        }
-        
-        .btn {
-            padding: 10px 20px;
-            border: none;
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
             border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
         }
         
-        .btn-primary {
-            background: #007bff;
-            color: white;
+        .dark ::-webkit-scrollbar-thumb {
+            background: #475569;
         }
         
-        .btn-primary:hover {
-            background: #0056b3;
+        /* Smooth transitions */
+        * {
+            transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
         }
         
-        .btn-secondary {
-            background: #6c757d;
-            color: white;
+        /* Side drawer animation */
+        @keyframes slide-in {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
         
-        .search-box {
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            width: 300px;
-            font-size: 14px;
+        .slide-in {
+            animation: slide-in 0.3s ease-out;
         }
         
-        .grid-container {
-            background: white;
-            border-radius: 8px;
-            overflow: hidden;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            overflow-x: auto;
+        /* Toast animation */
+        @keyframes toast-in {
+            from {
+                transform: translateY(-100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
         }
         
-        .grid-table {
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 1200px;
+        .toast-in {
+            animation: toast-in 0.3s ease-out;
         }
         
-        .grid-table thead {
-            background: #f8f9fa;
-            position: sticky;
-            top: 0;
-            z-index: 10;
+        /* Dense mode */
+        .dense-row {
+            height: 36px;
         }
         
-        .grid-table th {
-            padding: 12px;
-            text-align: left;
-            font-weight: 600;
-            color: #495057;
-            border-bottom: 2px solid #dee2e6;
-            font-size: 13px;
-            text-transform: uppercase;
-            cursor: pointer;
-            user-select: none;
-            position: relative;
+        /* Status dot pulse */
+        @keyframes pulse-dot {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
         }
         
-        .grid-table th:hover {
-            background: #e9ecef;
-        }
-        
-        .grid-table th.sortable::after {
-            content: ' ↕';
-            opacity: 0.3;
-            font-size: 10px;
-        }
-        
-        .grid-table th.sort-asc::after {
-            content: ' ↑';
-            opacity: 1;
-            color: #007bff;
-        }
-        
-        .grid-table th.sort-desc::after {
-            content: ' ↓';
-            opacity: 1;
-            color: #007bff;
-        }
-        
-        .grid-table td {
-            padding: 10px 12px;
-            border-bottom: 1px solid #dee2e6;
-            font-size: 14px;
-            color: #212529;
-        }
-        
-        .grid-table tbody tr {
-            transition: background 0.2s;
-        }
-        
-        .grid-table tbody tr:hover {
-            background: #f8f9fa;
-        }
-        
-        .grid-table tbody tr.expanded {
-            background: #f0f8ff;
-        }
-        
-        .grid-table input {
-            width: 100%;
-            padding: 6px;
-            border: 1px solid #ced4da;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-        
-        .grid-table input:focus {
-            outline: none;
-            border-color: #007bff;
-            box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
-        }
-        
-        .status-dot {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-right: 4px;
-        }
-        
-        .status-green {
-            background: #28a745;
-        }
-        
-        .status-red {
-            background: #dc3545;
-        }
-        
-        .status-gray {
-            background: #6c757d;
-        }
-        
-        .expand-btn {
-            background: none;
-            border: none;
-            cursor: pointer;
-            font-size: 18px;
-            padding: 4px 8px;
-            color: #007bff;
-        }
-        
-        .expand-btn:hover {
-            color: #0056b3;
-        }
-        
-        .expanded-row {
-            display: none;
-        }
-        
-        .expanded-row.active {
-            display: table-row;
-        }
-        
-        .expanded-content {
-            padding: 20px;
-            background: #f8f9fa;
-            border-top: 2px solid #dee2e6;
-        }
-        
-        .expanded-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 15px;
-        }
-        
-        .expanded-item {
-            background: white;
-            padding: 12px;
-            border-radius: 4px;
-            border: 1px solid #dee2e6;
-        }
-        
-        .expanded-item label {
-            font-size: 11px;
-            text-transform: uppercase;
-            color: #6c757d;
-            display: block;
-            margin-bottom: 4px;
-        }
-        
-        .expanded-item value {
-            font-size: 14px;
-            color: #212529;
-            font-weight: 500;
-        }
-        
-        .action-btn {
-            padding: 4px 8px;
-            font-size: 12px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-right: 4px;
-        }
-        
-        .btn-delete {
-            background: #dc3545;
-            color: white;
-        }
-        
-        .btn-delete:hover {
-            background: #c82333;
-        }
-        
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #6c757d;
-        }
-        
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            z-index: 1000;
-            overflow-y: auto;
-        }
-        
-        .modal-content {
-            background: white;
-            margin: 50px auto;
-            padding: 30px;
-            border-radius: 8px;
-            max-width: 800px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }
-        
-        .modal-header {
-            font-size: 20px;
-            font-weight: 600;
-            margin-bottom: 20px;
-        }
-        
-        .form-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-        }
-        
-        .form-group {
-            margin-bottom: 15px;
-        }
-        
-        .form-group.full-width {
-            grid-column: 1 / -1;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 500;
-            font-size: 14px;
-        }
-        
-        .form-group input, .form-group select, .form-group textarea {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1px solid #ced4da;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-        
-        .form-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 10px;
-            margin-top: 20px;
-        }
-        
-        .notification {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            padding: 15px 20px;
-            background: #28a745;
-            color: white;
-            border-radius: 4px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            display: none;
-            z-index: 2000;
+        .pulse-dot {
+            animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
     </style>
-</head>
-<body>
-    <div class="header">
-        <div>
-            <h1>📋 Inventory Management V2.0</h1>
-            <small style="color: #6c757d;">Total: <span id="total-count">{{ employees|length }}</span> employees</small>
-        </div>
-        <div class="header-actions">
-            <input type="text" class="search-box" placeholder="🔍 Search..." 
-                   value="{{ search }}" onkeyup="searchEmployees(this.value)">
-            <button class="btn btn-secondary" onclick="window.location.href='/'">← Dashboard</button>
-            <button class="btn btn-primary" onclick="showAddModal()">+ Add Employee</button>
-        </div>
-    </div>
-    
-    <div class="grid-container">
-        <table class="grid-table">
-            <thead>
-                <tr>
-                    <th style="width: 40px"></th>
-                    <th style="width: 50px">#</th>
-                    <th class="sortable" onclick="sortTable('full_name')" style="width: 200px">ФИО</th>
-                    <th class="sortable" onclick="sortTable('company')" style="width: 120px">Компания</th>
-                    <th class="sortable" onclick="sortTable('department')" style="width: 150px">Подразделение</th>
-                    <th class="sortable" onclick="sortTable('location')" style="width: 120px">Локация</th>
-                    <th class="sortable" onclick="sortTable('workstation')" style="width: 100px">WS</th>
-                    <th class="sortable" onclick="sortTable('internal_phone')" style="width: 100px">Телефон</th>
-                    <th style="width: 80px">Софт</th>
-                    <th style="width: 100px">Actions</th>
-                </tr>
-            </thead>
-            <tbody id="employees-tbody">
-                {% if employees %}
-                    {% for emp in employees %}
-                    <tr data-id="{{ emp.id }}">
-                        <td>
-                            <button class="expand-btn" onclick="toggleExpand({{ emp.id }})" id="expand-{{ emp.id }}">👁</button>
-                        </td>
-                        <td>{{ emp.id }}</td>
-                        <td><input type="text" value="{{ emp.full_name or '' }}" 
-                                   onchange="updateField({{ emp.id }}, 'full_name', this.value)"></td>
-                        <td><input type="text" value="{{ emp.company or '' }}" 
-                                   onchange="updateField({{ emp.id }}, 'company', this.value)"></td>
-                        <td><input type="text" value="{{ emp.department or '' }}" 
-                                   onchange="updateField({{ emp.id }}, 'department', this.value)"></td>
-                        <td><input type="text" value="{{ emp.location or '' }}" 
-                                   onchange="updateField({{ emp.id }}, 'location', this.value)"></td>
-                        <td><input type="text" value="{{ emp.workstation or '' }}" 
-                                   onchange="updateField({{ emp.id }}, 'workstation', this.value)"></td>
-                        <td><input type="text" value="{{ emp.internal_phone or '' }}" 
-                                   onchange="updateField({{ emp.id }}, 'internal_phone', this.value)"></td>
-                        <td>
-                            <span class="status-dot {% if emp.has_ad %}status-green{% else %}status-red{% endif %}" title="AD"></span>
-                            <span class="status-dot {% if emp.has_drweb %}status-green{% else %}status-red{% endif %}" title="DrWeb"></span>
-                            <span class="status-dot {% if emp.has_zabbix %}status-green{% else %}status-red{% endif %}" title="Zabbix"></span>
-                        </td>
-                        <td>
-                            <button class="action-btn btn-delete" onclick="deleteEmployee({{ emp.id }})">🗑️</button>
-                        </td>
-                    </tr>
-                    <tr class="expanded-row" id="expanded-{{ emp.id }}">
-                        <td colspan="10">
-                            <div class="expanded-content">
-                                <div class="expanded-grid">
-                                    <div class="expanded-item">
-                                        <label>Device Type</label>
-                                        <value>{{ emp.device_type or 'N/A' }}</value>
-                                    </div>
-                                    <div class="expanded-item">
-                                        <label>CPU</label>
-                                        <value>{{ emp.specs_cpu or 'N/A' }}</value>
-                                    </div>
-                                    <div class="expanded-item">
-                                        <label>GPU</label>
-                                        <value>{{ emp.specs_gpu or 'N/A' }}</value>
-                                    </div>
-                                    <div class="expanded-item">
-                                        <label>RAM</label>
-                                        <value>{{ emp.specs_ram or 'N/A' }}</value>
-                                    </div>
-                                    <div class="expanded-item">
-                                        <label>Monitor</label>
-                                        <value>{{ emp.monitor or 'N/A' }}</value>
-                                    </div>
-                                    <div class="expanded-item">
-                                        <label>UPS</label>
-                                        <value>{{ emp.ups or 'N/A' }}</value>
-                                    </div>
-                                    <div class="expanded-item">
-                                        <label>Phone Type</label>
-                                        <value>{{ emp.phone_type or 'N/A' }}</value>
-                                    </div>
-                                    <div class="expanded-item">
-                                        <label>Email</label>
-                                        <value>{{ emp.email or 'N/A' }}</value>
-                                    </div>
-                                    <div class="expanded-item">
-                                        <label>AD Login</label>
-                                        <value>{{ emp.ad_login or 'N/A' }}</value>
-                                    </div>
-                                    <div class="expanded-item full-width">
-                                        <label>Notes</label>
-                                        <value>{{ emp.notes or 'N/A' }}</value>
-                                    </div>
-                                </div>
-                            </div>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                {% else %}
-                    <tr>
-                        <td colspan="10" class="empty-state">
-                            <h3>No employees found</h3>
-                            <p>Run migration script or add employees manually</p>
-                        </td>
-                    </tr>
-                {% endif %}
-            </tbody>
-        </table>
-    </div>
-    
-    <!-- Add Employee Modal -->
-    <div id="addModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">Add New Employee</div>
-            <form id="addForm">
-                <div class="form-grid">
-                    <div class="form-group">
-                        <label>ФИО *</label>
-                        <input type="text" name="full_name" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Компания</label>
-                        <input type="text" name="company">
-                    </div>
-                    <div class="form-group">
-                        <label>Подразделение</label>
-                        <input type="text" name="department">
-                    </div>
-                    <div class="form-group">
-                        <label>Локация</label>
-                        <input type="text" name="location">
-                    </div>
-                    <div class="form-group">
-                        <label>WorkStation</label>
-                        <input type="text" name="workstation">
-                    </div>
-                    <div class="form-group">
-                        <label>Телефон</label>
-                        <input type="text" name="internal_phone">
-                    </div>
-                    <div class="form-group">
-                        <label>Phone Type</label>
-                        <select name="phone_type">
-                            <option value="NONE">NONE</option>
-                            <option value="TA">TA</option>
-                            <option value="MicroSIP">MicroSIP</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Device Type</label>
-                        <select name="device_type">
-                            <option value="">Select...</option>
-                            <option value="PC">PC</option>
-                            <option value="Laptop">Laptop</option>
-                            <option value="Monoblock">Monoblock</option>
-                            <option value="Server">Server</option>
-                            <option value="Other">Other</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>CPU</label>
-                        <input type="text" name="specs_cpu">
-                    </div>
-                    <div class="form-group">
-                        <label>GPU</label>
-                        <input type="text" name="specs_gpu">
-                    </div>
-                    <div class="form-group">
-                        <label>RAM</label>
-                        <input type="text" name="specs_ram" placeholder="e.g., 16GB">
-                    </div>
-                    <div class="form-group">
-                        <label>Monitor</label>
-                        <input type="text" name="monitor">
-                    </div>
-                    <div class="form-group">
-                        <label>UPS</label>
-                        <input type="text" name="ups">
-                    </div>
-                    <div class="form-group">
-                        <label>AD Login</label>
-                        <input type="text" name="ad_login">
-                    </div>
-                    <div class="form-group">
-                        <label>Email</label>
-                        <input type="email" name="email">
-                    </div>
-                    <div class="form-group full-width">
-                        <label>Примечание</label>
-                        <textarea name="notes" rows="3"></textarea>
-                    </div>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Save</button>
-                </div>
-            </form>
-        </div>
-    </div>
-    
-    <!-- Notification -->
-    <div id="notification" class="notification"></div>
     
     <script>
-        let currentSort = {column: null, direction: 'asc'};
-        
-        // Toggle expand row
-        function toggleExpand(id) {
-            const row = document.getElementById(`expanded-${id}`);
-            const btn = document.getElementById(`expand-${id}`);
-            row.classList.toggle('active');
-            btn.textContent = row.classList.contains('active') ? '👁' : '👁';
-        }
-        
-        // Sort table
-        function sortTable(column) {
-            const url = new URL(window.location);
-            if (currentSort.column === column) {
-                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
-            } else {
-                currentSort.column = column;
-                currentSort.direction = 'asc';
-            }
-            url.searchParams.set('sort', column);
-            url.searchParams.set('order', currentSort.direction);
-            window.location.href = url.toString();
-        }
-        
-        // Update field inline
-        async function updateField(id, field, value) {
-            try {
-                const response = await fetch(`/api/employees/${id}`, {
-                    method: 'PATCH',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    body: new URLSearchParams({[field]: value})
-                });
-                if (response.ok) {
-                    showNotification('✅ Updated successfully');
-                } else {
-                    showNotification('❌ Update failed', 'error');
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        primary: {
+                            50: '#f0f9ff',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            700: '#0369a1',
+                        }
+                    }
                 }
-            } catch (error) {
-                showNotification('❌ Network error', 'error');
             }
         }
-        
-        // Delete employee
-        async function deleteEmployee(id) {
-            if (!confirm('Are you sure you want to delete this employee?')) return;
-            
-            try {
-                const response = await fetch(`/api/employees/${id}`, {method: 'DELETE'});
-                if (response.ok) {
-                    document.querySelector(`tr[data-id="${id}"]`).remove();
-                    document.getElementById(`expanded-${id}`).remove();
-                    showNotification('✅ Deleted');
-                    updateCount();
-                }
-            } catch (error) {
-                showNotification('❌ Error', 'error');
-            }
-        }
-        
-        // Search employees
-        let searchTimeout;
-        function searchEmployees(query) {
-            clearTimeout(searchTimeout);
-            searchTimeout = setTimeout(() => {
-                window.location.href = `/inventory?search=${encodeURIComponent(query)}`;
-            }, 500);
-        }
-        
-        // Add employee modal
-        function showAddModal() {
-            document.getElementById('addModal').style.display = 'block';
-        }
-        
-        function closeModal() {
-            document.getElementById('addModal').style.display = 'none';
-            document.getElementById('addForm').reset();
-        }
-        
-        document.getElementById('addForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const formData = new FormData(e.target);
-            
-            try {
-                const response = await fetch('/api/employees', {
-                    method: 'POST',
-                    body: formData
-                });
+    </script>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen" 
+      x-data="inventoryApp()" 
+      @keydown.meta.k.prevent="searchOpen = true"
+      @keydown.ctrl.k.prevent="searchOpen = true">
+    
+    <!-- Top Navigation Bar -->
+    <nav class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40">
+        <div class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between items-center h-16">
+                <!-- Logo & Title -->
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center">
+                        <svg class="w-8 h-8 text-primary-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"></path>
+                        </svg>
+                        <span class="ml-3 text-xl font-bold">Admin Cockpit</span>
+                    </div>
+                    <div class="hidden md:flex items-center text-sm text-gray-500 dark:text-gray-400">
+                        <span class="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-700">{{ employees|length }} employees</span>
+                    </div>
+                </div>
                 
-                if (response.ok) {
-                    showNotification('✅ Employee added');
-                    setTimeout(() => location.reload(), 1000);
-                } else {
-                    showNotification('❌ Failed to add', 'error');
+                <!-- Search Bar -->
+                <div class="flex-1 max-w-2xl mx-8">
+                    <div class="relative">
+                        <input 
+                            type="text" 
+                            x-model="searchQuery"
+                            @input="filterEmployees"
+                            placeholder="Search employees... (⌘K)"
+                            class="w-full px-4 py-2 pl-10 pr-4 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-primary-500 focus:border-transparent">
+                        <svg class="absolute left-3 top-2.5 w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                    </div>
+                </div>
+                
+                <!-- Actions -->
+                <div class="flex items-center space-x-4">
+                    <!-- Dense Mode Toggle -->
+                    <button @click="denseMode = !denseMode" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700" title="Toggle Dense Mode">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                        </svg>
+                    </button>
+                    
+                    <!-- Dark Mode Toggle -->
+                    <button @click="darkMode = !darkMode" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
+                        <svg x-show="!darkMode" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path>
+                        </svg>
+                        <svg x-show="darkMode" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path>
+                        </svg>
+                    </button>
+                    
+                    <!-- Dashboard Link -->
+                    <a href="/" class="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                        Dashboard
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    
+    <!-- Main Content -->
+    <div class="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        
+        <!-- Filters & Actions Bar -->
+        <div class="mb-4 flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <!-- Column Sorting -->
+                <div class="flex items-center space-x-2 text-sm">
+                    <span class="text-gray-500 dark:text-gray-400">Sort by:</span>
+                    <select @change="window.location.href = `/inventory?sort=${$event.target.value}&order=asc`" 
+                            class="px-3 py-1.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm">
+                        <option value="full_name" {{ 'selected' if request.args.get('sort') == 'full_name' else '' }}>Name</option>
+                        <option value="company" {{ 'selected' if request.args.get('sort') == 'company' else '' }}>Company</option>
+                        <option value="department" {{ 'selected' if request.args.get('sort') == 'department' else '' }}>Department</option>
+                        <option value="workstation" {{ 'selected' if request.args.get('sort') == 'workstation' else '' }}>Workstation</option>
+                    </select>
+                </div>
+                
+                <!-- Filters (Company, Status) -->
+                <div class="flex items-center space-x-2">
+                    <button @click="filterCompany = filterCompany === 'all' ? 'MOBI' : (filterCompany === 'MOBI' ? 'EGR' : 'all')"
+                            class="px-3 py-1.5 rounded-lg border text-sm"
+                            :class="filterCompany === 'all' ? 'border-gray-300 dark:border-gray-600' : 'border-primary-500 bg-primary-50 dark:bg-primary-900'">
+                        <span x-text="filterCompany === 'all' ? 'All Companies' : filterCompany"></span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Results Count -->
+            <div class="text-sm text-gray-500 dark:text-gray-400">
+                Showing <span x-text="filteredEmployees.length"></span> of {{ employees|length }}
+            </div>
+        </div>
+        
+        <!-- The Super Grid -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 sticky top-16">
+                        <tr>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-12">#</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Company</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Department</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Location</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">WS</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Phone</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Device</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Software</th>
+                            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider w-24">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+                        {% if employees %}
+                        <template x-for="(emp, index) in filteredEmployees" :key="emp.id">
+                            <tr 
+                                :class="[
+                                    denseMode ? 'dense-row' : '',
+                                    !emp.is_active ? 'opacity-50' : '',
+                                    'hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors'
+                                ]"
+                                @click="openDrawer(emp)">
+                                
+                                <!-- ID -->
+                                <td class="px-4 py-3 text-sm text-gray-500 dark:text-gray-400" x-text="emp.id"></td>
+                                
+                                <!-- Name with Avatar -->
+                                <td class="px-4 py-3">
+                                    <div class="flex items-center">
+                                        <div class="flex-shrink-0 w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center">
+                                            <span class="text-xs font-medium text-primary-700 dark:text-primary-300" x-text="getInitials(emp.full_name)"></span>
+                                        </div>
+                                        <div class="ml-3">
+                                            <div class="text-sm font-medium text-gray-900 dark:text-gray-100" x-text="emp.full_name"></div>
+                                        </div>
+                                    </div>
+                                </td>
+                                
+                                <!-- Company -->
+                                <td class="px-4 py-3">
+                                    <span class="px-2 py-1 text-xs font-medium rounded-full"
+                                          :class="emp.company === 'MOBI' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' : 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200'"
+                                          x-text="emp.company || 'N/A'"></span>
+                                </td>
+                                
+                                <!-- Department -->
+                                <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-300" x-text="emp.department || '—'"></td>
+                                
+                                <!-- Location -->
+                                <td class="px-4 py-3 text-sm text-gray-600 dark:text-gray-300" x-text="emp.location || '—'"></td>
+                                
+                                <!-- Workstation -->
+                                <td class="px-4 py-3">
+                                    <code class="px-2 py-1 text-xs font-mono bg-gray-100 dark:bg-gray-700 rounded" x-text="emp.workstation || '—'"></code>
+                                </td>
+                                
+                                <!-- Phone -->
+                                <td class="px-4 py-3">
+                                    <div class="flex items-center space-x-2">
+                                        <span class="text-sm text-gray-600 dark:text-gray-300" x-text="emp.internal_phone || '—'"></span>
+                                        <span x-show="emp.phone_type && emp.phone_type !== 'NONE'" 
+                                              class="text-xs text-gray-400"
+                                              x-text="emp.phone_type === 'TA' ? '📞' : '💻'"></span>
+                                    </div>
+                                </td>
+                                
+                                <!-- Device Type -->
+                                <td class="px-4 py-3">
+                                    <span x-text="getDeviceIcon(emp.device_type)"></span>
+                                    <span class="ml-1 text-sm text-gray-600 dark:text-gray-300" x-text="emp.device_type || 'N/A'"></span>
+                                </td>
+                                
+                                <!-- Software Status -->
+                                <td class="px-4 py-3">
+                                    <div class="flex items-center space-x-2">
+                                        <div class="flex items-center" :title="'AD: ' + (emp.has_ad ? 'Yes' : 'No')">
+                                            <span class="w-2 h-2 rounded-full" 
+                                                  :class="emp.has_ad ? 'bg-green-500 pulse-dot' : 'bg-gray-300 dark:bg-gray-600'"></span>
+                                        </div>
+                                        <div class="flex items-center" :title="'DrWeb: ' + (emp.has_drweb ? 'Yes' : 'No')">
+                                            <span class="w-2 h-2 rounded-full" 
+                                                  :class="emp.has_drweb ? 'bg-green-500 pulse-dot' : 'bg-gray-300 dark:bg-gray-600'"></span>
+                                        </div>
+                                        <div class="flex items-center" :title="'Zabbix: ' + (emp.has_zabbix ? 'Yes' : 'No')">
+                                            <span class="w-2 h-2 rounded-full" 
+                                                  :class="emp.has_zabbix ? 'bg-green-500 pulse-dot' : 'bg-gray-300 dark:bg-gray-600'"></span>
+                                        </div>
+                                    </div>
+                                </td>
+                                
+                                <!-- Actions -->
+                                <td class="px-4 py-3">
+                                    <button @click.stop="openDrawer(emp)" 
+                                            class="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 text-sm font-medium">
+                                        View
+                                    </button>
+                                </td>
+                            </tr>
+                        </template>
+                        {% else %}
+                        <tr>
+                            <td colspan="10" class="px-4 py-12 text-center text-gray-500 dark:text-gray-400">
+                                <svg class="mx-auto w-12 h-12 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"></path>
+                                </svg>
+                                <p class="text-lg font-medium">No employees found</p>
+                                <p class="mt-1">Run migration script or add employees manually</p>
+                            </td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Side Drawer (Expanded View) -->
+    <div x-show="drawerOpen" 
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0"
+         x-transition:enter-end="opacity-100"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100"
+         x-transition:leave-end="opacity-0"
+         class="fixed inset-0 bg-black bg-opacity-50 z-50"
+         @click="drawerOpen = false">
+        
+        <div x-show="drawerOpen"
+             x-transition:enter="transition ease-out duration-300 transform"
+             x-transition:enter-start="translate-x-full"
+             x-transition:enter-end="translate-x-0"
+             x-transition:leave="transition ease-in duration-200 transform"
+             x-transition:leave-start="translate-x-0"
+             x-transition:leave-end="translate-x-full"
+             @click.stop
+             class="absolute right-0 top-0 h-full w-full max-w-2xl bg-white dark:bg-gray-800 shadow-2xl overflow-y-auto">
+            
+            <!-- Drawer Header -->
+            <div class="sticky top-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4 z-10">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-4">
+                        <div class="w-12 h-12 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center">
+                            <span class="text-lg font-bold text-primary-700 dark:text-primary-300" x-text="selectedEmployee ? getInitials(selectedEmployee.full_name) : ''"></span>
+                        </div>
+                        <div>
+                            <h2 class="text-xl font-bold text-gray-900 dark:text-gray-100" x-text="selectedEmployee?.full_name || 'Employee'"></h2>
+                            <p class="text-sm text-gray-500 dark:text-gray-400" x-text="selectedEmployee?.department || 'N/A'"></p>
+                        </div>
+                    </div>
+                    <button @click="drawerOpen = false" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                
+                <!-- Tabs -->
+                <div class="flex space-x-4 mt-4 border-b border-gray-200 dark:border-gray-700">
+                    <button @click="activeTab = 'hardware'" 
+                            :class="activeTab === 'hardware' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                            class="pb-2 px-1 border-b-2 font-medium text-sm transition-colors">
+                        Hardware
+                    </button>
+                    <button @click="activeTab = 'software'" 
+                            :class="activeTab === 'software' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                            class="pb-2 px-1 border-b-2 font-medium text-sm transition-colors">
+                        Software
+                    </button>
+                    <button @click="activeTab = 'access'" 
+                            :class="activeTab === 'access' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                            class="pb-2 px-1 border-b-2 font-medium text-sm transition-colors">
+                        Access
+                    </button>
+                    <button @click="activeTab = 'notes'" 
+                            :class="activeTab === 'notes' ? 'border-primary-500 text-primary-600 dark:text-primary-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                            class="pb-2 px-1 border-b-2 font-medium text-sm transition-colors">
+                        Notes
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Drawer Content -->
+            <div class="px-6 py-6">
+                
+                <!-- Hardware Tab -->
+                <div x-show="activeTab === 'hardware'" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <!-- Device Type -->
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Device Type</div>
+                            <div class="flex items-center space-x-2">
+                                <span x-text="getDeviceIcon(selectedEmployee?.device_type)"></span>
+                                <span class="font-medium" x-text="selectedEmployee?.device_type || 'N/A'"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- Workstation -->
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">Workstation</div>
+                            <code class="text-sm font-mono" x-text="selectedEmployee?.workstation || 'N/A'"></code>
+                        </div>
+                        
+                        <!-- CPU -->
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg col-span-2">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🖥 CPU</div>
+                            <div class="font-medium text-sm" x-text="selectedEmployee?.specs_cpu || 'N/A'"></div>
+                        </div>
+                        
+                        <!-- GPU -->
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🎮 GPU</div>
+                            <div class="font-medium text-sm" x-text="selectedEmployee?.specs_gpu || 'N/A'"></div>
+                        </div>
+                        
+                        <!-- RAM -->
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">💾 RAM</div>
+                            <div class="font-medium text-sm" x-text="selectedEmployee?.specs_ram || 'N/A'"></div>
+                        </div>
+                        
+                        <!-- Monitor -->
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🖥️ Monitor</div>
+                            <div class="font-medium text-sm" x-text="selectedEmployee?.monitor || 'N/A'"></div>
+                        </div>
+                        
+                        <!-- UPS -->
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🔋 UPS</div>
+                            <div class="font-medium text-sm" x-text="selectedEmployee?.ups || 'N/A'"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Software Tab -->
+                <div x-show="activeTab === 'software'" class="space-y-4">
+                    <div class="space-y-3">
+                        <!-- AD Toggle -->
+                        <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
+                                    <svg class="w-6 h-6 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div class="font-medium">Active Directory</div>
+                                    <div class="text-sm text-gray-500 dark:text-gray-400" x-text="selectedEmployee?.ad_login || 'Not configured'"></div>
+                                </div>
+                            </div>
+                            <div class="flex items-center">
+                                <span :class="selectedEmployee?.has_ad ? 'text-green-600' : 'text-gray-400'" class="text-2xl" x-text="selectedEmployee?.has_ad ? '✓' : '✗'"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- DrWeb Toggle -->
+                        <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900 flex items-center justify-center">
+                                    <svg class="w-6 h-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div class="font-medium">Dr.Web Antivirus</div>
+                                    <div class="text-sm text-gray-500 dark:text-gray-400">Antivirus protection</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center">
+                                <span :class="selectedEmployee?.has_drweb ? 'text-green-600' : 'text-gray-400'" class="text-2xl" x-text="selectedEmployee?.has_drweb ? '✓' : '✗'"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- Zabbix Toggle -->
+                        <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="flex items-center space-x-3">
+                                <div class="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900 flex items-center justify-center">
+                                    <svg class="w-6 h-6 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <div class="font-medium">Zabbix Monitoring</div>
+                                    <div class="text-sm text-gray-500 dark:text-gray-400">System monitoring</div>
+                                </div>
+                            </div>
+                            <div class="flex items-center">
+                                <span :class="selectedEmployee?.has_zabbix ? 'text-green-600' : 'text-gray-400'" class="text-2xl" x-text="selectedEmployee?.has_zabbix ? '✓' : '✗'"></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Access Tab -->
+                <div x-show="activeTab === 'access'" class="space-y-4">
+                    <div class="space-y-3">
+                        <!-- Email -->
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">📧 Email</div>
+                            <div class="font-medium" x-text="selectedEmployee?.email || 'N/A'"></div>
+                        </div>
+                        
+                        <!-- AD Login -->
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">🔑 AD Login</div>
+                            <code class="text-sm font-mono" x-text="selectedEmployee?.ad_login || 'N/A'"></code>
+                        </div>
+                        
+                        <!-- Phone -->
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">📞 Internal Phone</div>
+                            <div class="flex items-center space-x-2">
+                                <span class="font-medium" x-text="selectedEmployee?.internal_phone || 'N/A'"></span>
+                                <span class="text-xs text-gray-400" x-text="selectedEmployee?.phone_type && selectedEmployee.phone_type !== 'NONE' ? `(${selectedEmployee.phone_type})` : ''"></span>
+                            </div>
+                        </div>
+                        
+                        <!-- Location -->
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                            <div class="text-xs text-gray-500 dark:text-gray-400 mb-1">📍 Location</div>
+                            <div class="font-medium" x-text="selectedEmployee?.location || 'N/A'"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="mt-6 space-y-3">
+                        <button class="w-full px-4 py-3 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center space-x-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path>
+                            </svg>
+                            <span>Reset Password</span>
+                        </button>
+                        
+                        <button class="w-full px-4 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 rounded-lg font-medium transition-colors flex items-center justify-center space-x-2">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path>
+                            </svg>
+                            <span>Print Onboarding Sheet</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Notes Tab -->
+                <div x-show="activeTab === 'notes'" class="space-y-4">
+                    <div class="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg min-h-[200px]">
+                        <p class="text-sm text-gray-600 dark:text-gray-300 whitespace-pre-wrap" x-text="selectedEmployee?.notes || 'No notes available'"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Floating Action Button (FAB) -->
+    <button @click="showAddModal = true" 
+            class="fixed bottom-8 right-8 w-14 h-14 bg-primary-600 hover:bg-primary-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-40">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
+        </svg>
+    </button>
+    
+    <!-- Toast Notifications -->
+    <div x-show="toast.show" 
+         x-transition:enter="transition ease-out duration-300 transform"
+         x-transition:enter-start="translate-y-2 opacity-0"
+         x-transition:enter-end="translate-y-0 opacity-100"
+         x-transition:leave="transition ease-in duration-200 transform"
+         x-transition:leave-start="translate-y-0 opacity-100"
+         x-transition:leave-end="-translate-y-2 opacity-0"
+         class="fixed top-20 right-4 z-50 max-w-sm">
+        <div class="rounded-lg shadow-lg overflow-hidden"
+             :class="toast.type === 'success' ? 'bg-green-500' : 'bg-red-500'">
+            <div class="p-4 flex items-center space-x-3">
+                <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path x-show="toast.type === 'success'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    <path x-show="toast.type === 'error'" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
+                <p class="text-white font-medium" x-text="toast.message"></p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function inventoryApp() {
+            return {
+                // State
+                employees: {{ employees | tojson }},
+                filteredEmployees: [],
+                searchQuery: '',
+                denseMode: false,
+                drawerOpen: false,
+                selectedEmployee: null,
+                activeTab: 'hardware',
+                filterCompany: 'all',
+                toast: {
+                    show: false,
+                    message: '',
+                    type: 'success'
+                },
+                searchOpen: false,
+                showAddModal: false,
+                
+                // Initialize
+                init() {
+                    this.filteredEmployees = this.employees;
+                },
+                
+                // Helpers
+                getInitials(name) {
+                    if (!name) return '?';
+                    const parts = name.split(' ');
+                    if (parts.length >= 2) {
+                        return (parts[0][0] + parts[1][0]).toUpperCase();
+                    }
+                    return name.substring(0, 2).toUpperCase();
+                },
+                
+                getDeviceIcon(type) {
+                    const icons = {
+                        'Laptop': '💻',
+                        'PC': '🖥️',
+                        'Monoblock': '🖥',
+                        'Server': '🗄️',
+                        'Other': '📦'
+                    };
+                    return icons[type] || '📦';
+                },
+                
+                filterEmployees() {
+                    let results = this.employees;
+                    
+                    // Text search
+                    if (this.searchQuery) {
+                        const query = this.searchQuery.toLowerCase();
+                        results = results.filter(emp => 
+                            (emp.full_name && emp.full_name.toLowerCase().includes(query)) ||
+                            (emp.workstation && emp.workstation.toLowerCase().includes(query)) ||
+                            (emp.internal_phone && emp.internal_phone.includes(query)) ||
+                            (emp.email && emp.email.toLowerCase().includes(query)) ||
+                            (emp.department && emp.department.toLowerCase().includes(query))
+                        );
+                    }
+                    
+                    // Company filter
+                    if (this.filterCompany !== 'all') {
+                        results = results.filter(emp => emp.company === this.filterCompany);
+                    }
+                    
+                    this.filteredEmployees = results;
+                },
+                
+                openDrawer(employee) {
+                    this.selectedEmployee = employee;
+                    this.drawerOpen = true;
+                    this.activeTab = 'hardware';
+                },
+                
+                showToast(message, type = 'success') {
+                    this.toast = { show: true, message, type };
+                    setTimeout(() => {
+                        this.toast.show = false;
+                    }, 3000);
                 }
-            } catch (error) {
-                showNotification('❌ Network error', 'error');
-            }
-        });
-        
-        // Show notification
-        function showNotification(message, type = 'success') {
-            const notification = document.getElementById('notification');
-            notification.textContent = message;
-            notification.style.background = type === 'error' ? '#dc3545' : '#28a745';
-            notification.style.display = 'block';
-            setTimeout(() => {
-                notification.style.display = 'none';
-            }, 3000);
-        }
-        
-        // Update count
-        function updateCount() {
-            const count = document.querySelectorAll('#employees-tbody tr[data-id]').length;
-            document.getElementById('total-count').textContent = count;
-        }
-        
-        // Close modal on outside click
-        window.onclick = function(event) {
-            const modal = document.getElementById('addModal');
-            if (event.target == modal) {
-                closeModal();
             }
         }
     </script>
