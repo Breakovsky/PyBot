@@ -62,7 +62,7 @@ async def search_employees(query: str, limit: int = 10) -> List[Employee]:
         elif is_phone_query(query):
             # Phone search
             cleaned_phone = re.sub(r'[\s\-\(\)]+', '', query)
-            filters.append(Employee.phone.ilike(f"%{cleaned_phone}%"))
+            filters.append(Employee.internal_phone.ilike(f"%{cleaned_phone}%"))
         
         else:
             # General text search (name parts, ad_login, email)
@@ -153,8 +153,8 @@ def format_multiple_results(employees: List[Employee], query: str) -> str:
         
         if emp.workstation:
             parts.append(f"WS: <code>{emp.workstation}</code>")
-        if emp.phone:
-            parts.append(f"📞 <code>{emp.phone}</code>")
+        if emp.internal_phone:
+            parts.append(f"📞 <code>{emp.internal_phone}</code>")
         if emp.department:
             parts.append(f"({emp.department})")
         

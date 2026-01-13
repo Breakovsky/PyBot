@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Inventory Management - NetAdmin v3.0</title>
+    <title>Inventory Management V2.0 - NetAdmin</title>
     <style>
         * {
             margin: 0;
@@ -61,10 +61,6 @@
             color: white;
         }
         
-        .btn-secondary:hover {
-            background: #545b62;
-        }
-        
         .search-box {
             padding: 10px;
             border: 1px solid #ddd;
@@ -78,17 +74,20 @@
             border-radius: 8px;
             overflow: hidden;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow-x: auto;
         }
         
         .grid-table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 1200px;
         }
         
         .grid-table thead {
             background: #f8f9fa;
             position: sticky;
             top: 0;
+            z-index: 10;
         }
         
         .grid-table th {
@@ -99,17 +98,50 @@
             border-bottom: 2px solid #dee2e6;
             font-size: 13px;
             text-transform: uppercase;
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+        
+        .grid-table th:hover {
+            background: #e9ecef;
+        }
+        
+        .grid-table th.sortable::after {
+            content: ' ↕';
+            opacity: 0.3;
+            font-size: 10px;
+        }
+        
+        .grid-table th.sort-asc::after {
+            content: ' ↑';
+            opacity: 1;
+            color: #007bff;
+        }
+        
+        .grid-table th.sort-desc::after {
+            content: ' ↓';
+            opacity: 1;
+            color: #007bff;
         }
         
         .grid-table td {
-            padding: 12px;
+            padding: 10px 12px;
             border-bottom: 1px solid #dee2e6;
             font-size: 14px;
             color: #212529;
         }
         
+        .grid-table tbody tr {
+            transition: background 0.2s;
+        }
+        
         .grid-table tbody tr:hover {
             background: #f8f9fa;
+        }
+        
+        .grid-table tbody tr.expanded {
+            background: #f0f8ff;
         }
         
         .grid-table input {
@@ -126,27 +158,78 @@
             box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
         }
         
-        .checkbox {
-            width: 20px;
-            height: 20px;
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+        
+        .status-green {
+            background: #28a745;
+        }
+        
+        .status-red {
+            background: #dc3545;
+        }
+        
+        .status-gray {
+            background: #6c757d;
+        }
+        
+        .expand-btn {
+            background: none;
+            border: none;
             cursor: pointer;
-        }
-        
-        .status-badge {
+            font-size: 18px;
             padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 12px;
+            color: #007bff;
+        }
+        
+        .expand-btn:hover {
+            color: #0056b3;
+        }
+        
+        .expanded-row {
+            display: none;
+        }
+        
+        .expanded-row.active {
+            display: table-row;
+        }
+        
+        .expanded-content {
+            padding: 20px;
+            background: #f8f9fa;
+            border-top: 2px solid #dee2e6;
+        }
+        
+        .expanded-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+        
+        .expanded-item {
+            background: white;
+            padding: 12px;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .expanded-item label {
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #6c757d;
+            display: block;
+            margin-bottom: 4px;
+        }
+        
+        .expanded-item value {
+            font-size: 14px;
+            color: #212529;
             font-weight: 500;
-        }
-        
-        .status-active {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .status-inactive {
-            background: #f8d7da;
-            color: #721c24;
         }
         
         .action-btn {
@@ -182,6 +265,7 @@
             height: 100%;
             background: rgba(0,0,0,0.5);
             z-index: 1000;
+            overflow-y: auto;
         }
         
         .modal-content {
@@ -189,7 +273,7 @@
             margin: 50px auto;
             padding: 30px;
             border-radius: 8px;
-            max-width: 600px;
+            max-width: 800px;
             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
         
@@ -199,8 +283,18 @@
             margin-bottom: 20px;
         }
         
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+        }
+        
         .form-group {
             margin-bottom: 15px;
+        }
+        
+        .form-group.full-width {
+            grid-column: 1 / -1;
         }
         
         .form-group label {
@@ -210,7 +304,7 @@
             font-size: 14px;
         }
         
-        .form-group input, .form-group textarea {
+        .form-group input, .form-group select, .form-group textarea {
             width: 100%;
             padding: 8px 12px;
             border: 1px solid #ced4da;
@@ -242,11 +336,11 @@
 <body>
     <div class="header">
         <div>
-            <h1>📋 Inventory Management</h1>
+            <h1>📋 Inventory Management V2.0</h1>
             <small style="color: #6c757d;">Total: <span id="total-count">{{ employees|length }}</span> employees</small>
         </div>
         <div class="header-actions">
-            <input type="text" class="search-box" placeholder="🔍 Search by name, phone, WS..." 
+            <input type="text" class="search-box" placeholder="🔍 Search..." 
                    value="{{ search }}" onkeyup="searchEmployees(this.value)">
             <button class="btn btn-secondary" onclick="window.location.href='/'">← Dashboard</button>
             <button class="btn btn-primary" onclick="showAddModal()">+ Add Employee</button>
@@ -257,15 +351,15 @@
         <table class="grid-table">
             <thead>
                 <tr>
+                    <th style="width: 40px"></th>
                     <th style="width: 50px">#</th>
-                    <th style="width: 200px">ФИО</th>
-                    <th style="width: 150px">Подразделение</th>
-                    <th style="width: 120px">Телефон</th>
-                    <th style="width: 100px">WorkStation</th>
-                    <th style="width: 120px">AD Login</th>
-                    <th style="width: 150px">Email</th>
-                    <th style="width: 200px">Примечание</th>
-                    <th style="width: 80px">Status</th>
+                    <th class="sortable" onclick="sortTable('full_name')" style="width: 200px">ФИО</th>
+                    <th class="sortable" onclick="sortTable('company')" style="width: 120px">Компания</th>
+                    <th class="sortable" onclick="sortTable('department')" style="width: 150px">Подразделение</th>
+                    <th class="sortable" onclick="sortTable('location')" style="width: 120px">Локация</th>
+                    <th class="sortable" onclick="sortTable('workstation')" style="width: 100px">WS</th>
+                    <th class="sortable" onclick="sortTable('internal_phone')" style="width: 100px">Телефон</th>
+                    <th style="width: 80px">Софт</th>
                     <th style="width: 100px">Actions</th>
                 </tr>
             </thead>
@@ -273,31 +367,77 @@
                 {% if employees %}
                     {% for emp in employees %}
                     <tr data-id="{{ emp.id }}">
+                        <td>
+                            <button class="expand-btn" onclick="toggleExpand({{ emp.id }})" id="expand-{{ emp.id }}">👁</button>
+                        </td>
                         <td>{{ emp.id }}</td>
-                        <td><input type="text" value="{{ emp.full_name }}" 
+                        <td><input type="text" value="{{ emp.full_name or '' }}" 
                                    onchange="updateField({{ emp.id }}, 'full_name', this.value)"></td>
+                        <td><input type="text" value="{{ emp.company or '' }}" 
+                                   onchange="updateField({{ emp.id }}, 'company', this.value)"></td>
                         <td><input type="text" value="{{ emp.department or '' }}" 
                                    onchange="updateField({{ emp.id }}, 'department', this.value)"></td>
-                        <td><input type="text" value="{{ emp.phone or '' }}" 
-                                   onchange="updateField({{ emp.id }}, 'phone', this.value)"></td>
+                        <td><input type="text" value="{{ emp.location or '' }}" 
+                                   onchange="updateField({{ emp.id }}, 'location', this.value)"></td>
                         <td><input type="text" value="{{ emp.workstation or '' }}" 
                                    onchange="updateField({{ emp.id }}, 'workstation', this.value)"></td>
-                        <td><input type="text" value="{{ emp.ad_login or '' }}" 
-                                   onchange="updateField({{ emp.id }}, 'ad_login', this.value)"></td>
-                        <td><input type="text" value="{{ emp.email or '' }}" 
-                                   onchange="updateField({{ emp.id }}, 'email', this.value)"></td>
-                        <td><input type="text" value="{{ emp.notes or '' }}" 
-                                   onchange="updateField({{ emp.id }}, 'notes', this.value)"></td>
+                        <td><input type="text" value="{{ emp.internal_phone or '' }}" 
+                                   onchange="updateField({{ emp.id }}, 'internal_phone', this.value)"></td>
                         <td>
-                            <input type="checkbox" class="checkbox" 
-                                   {% if emp.is_active %}checked{% endif %}
-                                   onchange="toggleStatus({{ emp.id }})">
-                            <span class="status-badge {% if emp.is_active %}status-active{% else %}status-inactive{% endif %}">
-                                {% if emp.is_active %}Active{% else %}Disabled{% endif %}
-                            </span>
+                            <span class="status-dot {% if emp.has_ad %}status-green{% else %}status-red{% endif %}" title="AD"></span>
+                            <span class="status-dot {% if emp.has_drweb %}status-green{% else %}status-red{% endif %}" title="DrWeb"></span>
+                            <span class="status-dot {% if emp.has_zabbix %}status-green{% else %}status-red{% endif %}" title="Zabbix"></span>
                         </td>
                         <td>
-                            <button class="action-btn btn-delete" onclick="deleteEmployee({{ emp.id }})">🗑️ Delete</button>
+                            <button class="action-btn btn-delete" onclick="deleteEmployee({{ emp.id }})">🗑️</button>
+                        </td>
+                    </tr>
+                    <tr class="expanded-row" id="expanded-{{ emp.id }}">
+                        <td colspan="10">
+                            <div class="expanded-content">
+                                <div class="expanded-grid">
+                                    <div class="expanded-item">
+                                        <label>Device Type</label>
+                                        <value>{{ emp.device_type or 'N/A' }}</value>
+                                    </div>
+                                    <div class="expanded-item">
+                                        <label>CPU</label>
+                                        <value>{{ emp.specs_cpu or 'N/A' }}</value>
+                                    </div>
+                                    <div class="expanded-item">
+                                        <label>GPU</label>
+                                        <value>{{ emp.specs_gpu or 'N/A' }}</value>
+                                    </div>
+                                    <div class="expanded-item">
+                                        <label>RAM</label>
+                                        <value>{{ emp.specs_ram or 'N/A' }}</value>
+                                    </div>
+                                    <div class="expanded-item">
+                                        <label>Monitor</label>
+                                        <value>{{ emp.monitor or 'N/A' }}</value>
+                                    </div>
+                                    <div class="expanded-item">
+                                        <label>UPS</label>
+                                        <value>{{ emp.ups or 'N/A' }}</value>
+                                    </div>
+                                    <div class="expanded-item">
+                                        <label>Phone Type</label>
+                                        <value>{{ emp.phone_type or 'N/A' }}</value>
+                                    </div>
+                                    <div class="expanded-item">
+                                        <label>Email</label>
+                                        <value>{{ emp.email or 'N/A' }}</value>
+                                    </div>
+                                    <div class="expanded-item">
+                                        <label>AD Login</label>
+                                        <value>{{ emp.ad_login or 'N/A' }}</value>
+                                    </div>
+                                    <div class="expanded-item full-width">
+                                        <label>Notes</label>
+                                        <value>{{ emp.notes or 'N/A' }}</value>
+                                    </div>
+                                </div>
+                            </div>
                         </td>
                     </tr>
                     {% endfor %}
@@ -318,33 +458,82 @@
         <div class="modal-content">
             <div class="modal-header">Add New Employee</div>
             <form id="addForm">
-                <div class="form-group">
-                    <label>ФИО *</label>
-                    <input type="text" name="full_name" required>
-                </div>
-                <div class="form-group">
-                    <label>Подразделение</label>
-                    <input type="text" name="department">
-                </div>
-                <div class="form-group">
-                    <label>Телефон</label>
-                    <input type="text" name="phone">
-                </div>
-                <div class="form-group">
-                    <label>WorkStation</label>
-                    <input type="text" name="workstation">
-                </div>
-                <div class="form-group">
-                    <label>AD Login</label>
-                    <input type="text" name="ad_login">
-                </div>
-                <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" name="email">
-                </div>
-                <div class="form-group">
-                    <label>Примечание</label>
-                    <textarea name="notes" rows="3"></textarea>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>ФИО *</label>
+                        <input type="text" name="full_name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Компания</label>
+                        <input type="text" name="company">
+                    </div>
+                    <div class="form-group">
+                        <label>Подразделение</label>
+                        <input type="text" name="department">
+                    </div>
+                    <div class="form-group">
+                        <label>Локация</label>
+                        <input type="text" name="location">
+                    </div>
+                    <div class="form-group">
+                        <label>WorkStation</label>
+                        <input type="text" name="workstation">
+                    </div>
+                    <div class="form-group">
+                        <label>Телефон</label>
+                        <input type="text" name="internal_phone">
+                    </div>
+                    <div class="form-group">
+                        <label>Phone Type</label>
+                        <select name="phone_type">
+                            <option value="NONE">NONE</option>
+                            <option value="TA">TA</option>
+                            <option value="MicroSIP">MicroSIP</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Device Type</label>
+                        <select name="device_type">
+                            <option value="">Select...</option>
+                            <option value="PC">PC</option>
+                            <option value="Laptop">Laptop</option>
+                            <option value="Monoblock">Monoblock</option>
+                            <option value="Server">Server</option>
+                            <option value="Other">Other</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>CPU</label>
+                        <input type="text" name="specs_cpu">
+                    </div>
+                    <div class="form-group">
+                        <label>GPU</label>
+                        <input type="text" name="specs_gpu">
+                    </div>
+                    <div class="form-group">
+                        <label>RAM</label>
+                        <input type="text" name="specs_ram" placeholder="e.g., 16GB">
+                    </div>
+                    <div class="form-group">
+                        <label>Monitor</label>
+                        <input type="text" name="monitor">
+                    </div>
+                    <div class="form-group">
+                        <label>UPS</label>
+                        <input type="text" name="ups">
+                    </div>
+                    <div class="form-group">
+                        <label>AD Login</label>
+                        <input type="text" name="ad_login">
+                    </div>
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input type="email" name="email">
+                    </div>
+                    <div class="form-group full-width">
+                        <label>Примечание</label>
+                        <textarea name="notes" rows="3"></textarea>
+                    </div>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -358,6 +547,30 @@
     <div id="notification" class="notification"></div>
     
     <script>
+        let currentSort = {column: null, direction: 'asc'};
+        
+        // Toggle expand row
+        function toggleExpand(id) {
+            const row = document.getElementById(`expanded-${id}`);
+            const btn = document.getElementById(`expand-${id}`);
+            row.classList.toggle('active');
+            btn.textContent = row.classList.contains('active') ? '👁' : '👁';
+        }
+        
+        // Sort table
+        function sortTable(column) {
+            const url = new URL(window.location);
+            if (currentSort.column === column) {
+                currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentSort.column = column;
+                currentSort.direction = 'asc';
+            }
+            url.searchParams.set('sort', column);
+            url.searchParams.set('order', currentSort.direction);
+            window.location.href = url.toString();
+        }
+        
         // Update field inline
         async function updateField(id, field, value) {
             try {
@@ -376,19 +589,6 @@
             }
         }
         
-        // Toggle active status
-        async function toggleStatus(id) {
-            try {
-                const response = await fetch(`/api/employees/${id}/toggle`, {method: 'POST'});
-                if (response.ok) {
-                    showNotification('✅ Status toggled');
-                    setTimeout(() => location.reload(), 1000);
-                }
-            } catch (error) {
-                showNotification('❌ Error', 'error');
-            }
-        }
-        
         // Delete employee
         async function deleteEmployee(id) {
             if (!confirm('Are you sure you want to delete this employee?')) return;
@@ -397,6 +597,7 @@
                 const response = await fetch(`/api/employees/${id}`, {method: 'DELETE'});
                 if (response.ok) {
                     document.querySelector(`tr[data-id="${id}"]`).remove();
+                    document.getElementById(`expanded-${id}`).remove();
                     showNotification('✅ Deleted');
                     updateCount();
                 }
@@ -458,7 +659,7 @@
         
         // Update count
         function updateCount() {
-            const count = document.querySelectorAll('#employees-tbody tr').length;
+            const count = document.querySelectorAll('#employees-tbody tr[data-id]').length;
             document.getElementById('total-count').textContent = count;
         }
         
@@ -472,4 +673,3 @@
     </script>
 </body>
 </html>
-

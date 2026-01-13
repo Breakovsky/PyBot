@@ -46,17 +46,40 @@ class MonitoredTarget(Base):
 class Employee(Base):
     __tablename__ = "employees"
     id = Column(Integer, primary_key=True, index=True)
-    last_name = Column(String, index=True)
-    first_name = Column(String, index=True)
-    middle_name = Column(String, index=True)
+    
+    # Identity & Organization
+    company = Column(String(100), index=True)
+    last_name = Column(String(100), index=True)
+    first_name = Column(String(100), index=True)
+    middle_name = Column(String(100), index=True)
     # full_name is a GENERATED column in PostgreSQL, accessible as property
-    department = Column(String)
-    phone = Column(String, index=True)
-    workstation = Column(String, index=True)
-    ad_login = Column(String, index=True)
-    email = Column(String, index=True)
-    notes = Column(String)
+    department = Column(String(255), index=True)
+    location = Column(String(255), index=True)
+    
+    # Contact Information
+    email = Column(String(255), index=True)
+    phone_type = Column(String(20))  # 'TA', 'MicroSIP', 'NONE'
+    internal_phone = Column(String(50), index=True)
+    
+    # Hardware Inventory
+    workstation = Column(String(100), index=True)
+    device_type = Column(String(50))  # 'PC', 'Laptop', 'Monoblock', 'Server', 'Other'
+    specs_cpu = Column(String(255))
+    specs_gpu = Column(String(255))
+    specs_ram = Column(String(50))
+    monitor = Column(String(255))
+    ups = Column(String(255))
+    
+    # Software Status
+    has_ad = Column(Boolean, default=False)
+    has_drweb = Column(Boolean, default=False)
+    has_zabbix = Column(Boolean, default=False)
+    
+    # Additional
+    ad_login = Column(String(100), index=True)
+    notes = Column(Text)
     is_active = Column(Boolean, default=True)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
@@ -213,10 +236,12 @@ async def download_backup(filename: str, _: None = Depends(verify_auth)):
 async def inventory_page(
     request: Request,
     search: Optional[str] = None,
+    sort: Optional[str] = None,
+    order: Optional[str] = "asc",
     db: Session = Depends(get_db),
     _: None = Depends(verify_auth)
 ):
-    """Inventory Grid UI - Google Sheets-like experience."""
+    """Inventory Grid UI V2.0 - with sorting and expandable rows."""
     query = db.query(Employee)
     
     # Search filter - search in all name parts and other fields
@@ -226,18 +251,35 @@ async def inventory_page(
             (Employee.last_name.ilike(search_filter)) |
             (Employee.first_name.ilike(search_filter)) |
             (Employee.middle_name.ilike(search_filter)) |
-            (Employee.phone.ilike(search_filter)) |
+            (Employee.company.ilike(search_filter)) |
+            (Employee.department.ilike(search_filter)) |
+            (Employee.location.ilike(search_filter)) |
+            (Employee.internal_phone.ilike(search_filter)) |
             (Employee.workstation.ilike(search_filter)) |
             (Employee.ad_login.ilike(search_filter)) |
             (Employee.email.ilike(search_filter))
         )
     
-    employees = query.order_by(Employee.last_name, Employee.first_name).limit(500).all()
+    # Server-side sorting
+    if sort:
+        sort_column = getattr(Employee, sort, None)
+        if sort_column is not None:
+            if order == "desc":
+                query = query.order_by(sort_column.desc())
+            else:
+                query = query.order_by(sort_column.asc())
+    else:
+        # Default sort by last_name, first_name
+        query = query.order_by(Employee.last_name, Employee.first_name)
+    
+    employees = query.limit(500).all()
     
     return templates.TemplateResponse("inventory.html", {
         "request": request,
         "employees": employees,
-        "search": search or ""
+        "search": search or "",
+        "sort": sort or "",
+        "order": order or "asc"
     })
 
 @app.get("/api/employees")
@@ -257,7 +299,10 @@ async def get_employees(
             (Employee.last_name.ilike(search_filter)) |
             (Employee.first_name.ilike(search_filter)) |
             (Employee.middle_name.ilike(search_filter)) |
-            (Employee.phone.ilike(search_filter)) |
+            (Employee.company.ilike(search_filter)) |
+            (Employee.department.ilike(search_filter)) |
+            (Employee.location.ilike(search_filter)) |
+            (Employee.internal_phone.ilike(search_filter)) |
             (Employee.workstation.ilike(search_filter))
         )
     
@@ -299,24 +344,48 @@ def parse_fio(full_name: str):
 @app.post("/api/employees")
 async def create_employee(
     full_name: str = Form(...),
+    company: str = Form(None),
     department: str = Form(None),
-    phone: str = Form(None),
+    location: str = Form(None),
+    internal_phone: str = Form(None),
+    phone_type: str = Form(None),
     workstation: str = Form(None),
+    device_type: str = Form(None),
+    specs_cpu: str = Form(None),
+    specs_gpu: str = Form(None),
+    specs_ram: str = Form(None),
+    monitor: str = Form(None),
+    ups: str = Form(None),
     ad_login: str = Form(None),
     email: str = Form(None),
+    has_ad: bool = Form(False),
+    has_drweb: bool = Form(False),
+    has_zabbix: bool = Form(False),
     notes: str = Form(None),
     db: Session = Depends(get_db),
     _: None = Depends(verify_auth)
 ):
-    """Create new employee."""
+    """Create new employee with all V2.0 fields."""
     last_name, first_name, middle_name = parse_fio(full_name)
     employee = Employee(
+        company=company,
         last_name=last_name,
         first_name=first_name,
         middle_name=middle_name,
         department=department,
-        phone=phone,
+        location=location,
+        internal_phone=internal_phone,
+        phone_type=phone_type or 'NONE',
         workstation=workstation,
+        device_type=device_type,
+        specs_cpu=specs_cpu,
+        specs_gpu=specs_gpu,
+        specs_ram=specs_ram,
+        monitor=monitor,
+        ups=ups,
+        has_ad=has_ad,
+        has_drweb=has_drweb,
+        has_zabbix=has_zabbix,
         ad_login=ad_login,
         email=email,
         notes=notes
@@ -325,7 +394,7 @@ async def create_employee(
     db.commit()
     db.refresh(employee)
     
-    return {"status": "success", "id": employee.id}
+    return RedirectResponse(url="/inventory", status_code=status.HTTP_303_SEE_OTHER)
 
 @app.patch("/api/employees/{employee_id}")
 async def update_employee(

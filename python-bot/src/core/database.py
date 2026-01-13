@@ -45,18 +45,40 @@ class Employee(Base):
     __tablename__ = 'employees'
     
     id = Column(Integer, primary_key=True)
+    
+    # Identity & Organization
+    company = Column(String)
     last_name = Column(String)
     first_name = Column(String)
     middle_name = Column(String)
-    # full_name is a computed/generated column in PostgreSQL, but SQLAlchemy can still access it
-    # We'll add a property to construct it if needed
+    # full_name is a GENERATED column in PostgreSQL
     department = Column(String)
-    phone = Column(String)
-    workstation = Column(String)
-    ad_login = Column(String)
+    location = Column(String)
+    
+    # Contact Information
     email = Column(String)
+    phone_type = Column(String)  # 'TA', 'MicroSIP', 'NONE'
+    internal_phone = Column(String)
+    
+    # Hardware Inventory
+    workstation = Column(String)
+    device_type = Column(String)  # 'PC', 'Laptop', 'Monoblock', 'Server', 'Other'
+    specs_cpu = Column(String)
+    specs_gpu = Column(String)
+    specs_ram = Column(String)
+    monitor = Column(String)
+    ups = Column(String)
+    
+    # Software Status
+    has_ad = Column(Integer, default=0)  # SQLite uses integers for booleans
+    has_drweb = Column(Integer, default=0)
+    has_zabbix = Column(Integer, default=0)
+    
+    # Additional
+    ad_login = Column(String)
     notes = Column(String)
-    is_active = Column(Integer, default=1)  # SQLite uses integers for booleans
+    is_active = Column(Integer, default=1)
+    
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     
