@@ -16,6 +16,7 @@ import logging
 import secrets
 import hashlib
 import hmac
+import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional, Literal
 from contextlib import asynccontextmanager
@@ -23,7 +24,8 @@ from functools import wraps
 
 import docker
 import redis
-from fastapi import FastAPI, Request, Form, Depends, HTTPException, status, Query
+import itsdangerous
+from fastapi import FastAPI, Request, Form, Depends, HTTPException, status, Query, Response
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -46,6 +48,8 @@ DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST
 # Redis Configuration
 REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
+REDIS_DB = 1 # Use DB 1 for sessions to separate from queues/cache
+redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
 
 # Security Configuration
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
@@ -55,7 +59,11 @@ if not ADMIN_PASSWORD or ADMIN_PASSWORD == "admin":
 
 # Secret key for signing tokens (generate if not provided)
 SECRET_KEY = os.getenv("ADMIN_SECRET_KEY", secrets.token_hex(32))
-TOKEN_EXPIRY_HOURS = 24
+SESSION_TTL_HOURS = 24 * 7 # 7 days session persistence
+TOKEN_EXPIRY_HOURS = SESSION_TTL_HOURS # Align token expiry with session TTL
+
+# Session Signer
+signer = itsdangerous.TimestampSigner(SECRET_KEY)
 
 # --- Pydantic Models (Request/Response Validation) ---
 
@@ -129,6 +137,7 @@ Base = declarative_base()
 
 class MonitoredTarget(Base):
     __tablename__ = "monitored_targets"
+    __table_args__ = {'extend_existing': True}
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), index=True)
     hostname = Column(String(255))
@@ -182,6 +191,16 @@ class Employee(Base):
         """Construct full name from parts."""
         parts = [self.last_name or "", self.first_name or "", self.middle_name or ""]
         return " ".join(p for p in parts if p).strip() or None
+
+
+class WorkstationRange(Base):
+    __tablename__ = "workstation_ranges"
+    id = Column(Integer, primary_key=True, index=True)
+    prefix = Column(String(20), nullable=False)
+    range_start = Column(Integer, nullable=False)
+    range_end = Column(Integer, nullable=False)
+    description = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True)
 
 
 # Note: In production, use Alembic migrations instead of create_all()
@@ -253,31 +272,129 @@ redis_client = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=Tr
 
 # --- FastAPI App ---
 templates = Jinja2Templates(directory="src/templates")
+
+def initials_filter(value):
+    """Jinja2 filter to extract initials from name."""
+    if not value: return "?"
+    parts = value.split()
+    if len(parts) >= 2:
+        return (parts[0][0] + parts[1][0]).upper()
+    return value[:2].upper()
+
+templates.env.filters["initials"] = initials_filter
+
 app = FastAPI(title="NetAdmin Control Plane", version="3.0.0")
 
 
-# --- Auth Dependencies ---
+# --- Global Exception Handlers (Auth & HTMX) ---
 
-def get_auth_token(request: Request) -> Optional[str]:
-    """Extract auth token from cookie."""
-    return request.cookies.get("admin_token")
+class AuthenticationError(Exception):
+    """Custom exception for authentication failures."""
+    pass
 
-
-def verify_auth(request: Request) -> bool:
-    """Verify authentication - raises HTTPException if invalid."""
-    token = get_auth_token(request)
-    if not verify_token(token):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated"
+@app.exception_handler(AuthenticationError)
+async def auth_exception_handler(request: Request, exc: AuthenticationError):
+    """
+    Handle auth errors globally.
+    - HTMX requests: Send HX-Redirect header (client-side redirect).
+    - Browser requests: Send 302 Found (server-side redirect).
+    """
+    if request.headers.get("HX-Request"):
+        logger.info(f"HTMX Auth Error: Redirecting to /login (Path: {request.url.path})")
+        return Response(
+            content="Session expired", 
+            status_code=401,
+            headers={"HX-Redirect": "/login"}
         )
+    
+    logger.info(f"Browser Auth Error: Redirecting to /login (Path: {request.url.path})")
+    return RedirectResponse(
+        url="/login", 
+        status_code=status.HTTP_302_FOUND
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """
+    Catch all HTTPException and handle 401s specially for HTMX.
+    This ensures expired sessions always redirect cleanly, no broken partials.
+    """
+    if exc.status_code == 401:
+        if request.headers.get("HX-Request"):
+            logger.info(f"HTMX 401 Unauthorized: Redirecting to /login (Path: {request.url.path})")
+            return Response(
+                content="Unauthorized - Please login again",
+                status_code=401,
+                headers={"HX-Redirect": "/login"}
+            )
+        
+        logger.info(f"Browser 401 Unauthorized: Redirecting to /login (Path: {request.url.path})")
+        return RedirectResponse(
+            url="/login",
+            status_code=status.HTTP_302_FOUND
+        )
+    
+    # For non-401 errors, return default JSON error
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
+
+
+# --- Authentication Helpers (Redis Sessions) ---
+
+def create_session(user_id: str, role: str = "admin") -> str:
+    """Create a new session in Redis and return the signed session ID."""
+    session_id = str(uuid.uuid4())
+    session_data = {
+        "user_id": user_id,
+        "role": role,
+        "created_at": datetime.utcnow().isoformat()
+    }
+    # Store in Redis with TTL
+    redis_key = f"session:{session_id}"
+    redis_client.hset(redis_key, mapping=session_data)
+    redis_client.expire(redis_key, timedelta(hours=SESSION_TTL_HOURS))
+    
+    # Sign the session ID to prevent tampering
+    signed_session_id = signer.sign(session_id).decode('utf-8')
+    return signed_session_id
+
+def get_current_session(request: Request) -> Optional[dict]:
+    """Retrieve and validate the session from the cookie."""
+    signed_session_id = request.cookies.get("session_id")
+    if not signed_session_id:
+        return None
+    
+    try:
+        # Verify signature and get original session ID
+        # max_age ensures the signature itself hasn't expired (double check)
+        session_id = signer.unsign(signed_session_id, max_age=SESSION_TTL_HOURS * 3600).decode('utf-8')
+    except (itsdangerous.BadSignature, itsdangerous.SignatureExpired):
+        return None
+        
+    # Check Redis
+    redis_key = f"session:{session_id}"
+    session_data = redis_client.hgetall(redis_key)
+    
+    if not session_data:
+        return None
+        
+    # Refresh TTL on activity (sliding expiration)
+    redis_client.expire(redis_key, timedelta(hours=SESSION_TTL_HOURS))
+    
+    return session_data
+
+def verify_auth(request: Request):
+    """Dependency to enforce authentication."""
+    session = get_current_session(request)
+    if not session:
+        raise AuthenticationError()
     return True
 
-
 def verify_auth_soft(request: Request) -> bool:
-    """Verify authentication - returns False instead of raising."""
-    token = get_auth_token(request)
-    return verify_token(token)
+    """Check auth without raising exception (for conditional rendering)."""
+    return get_current_session(request) is not None
 
 
 # --- Routes ---
@@ -330,33 +447,171 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
     })
 
 
-@app.post("/login")
-async def login(password: str = Form(...)):
-    """Handle login form submission."""
+@app.get("/monitoring", response_class=HTMLResponse)
+async def monitoring_page(request: Request, db: Session = Depends(get_db), _: bool = Depends(verify_auth)):
+    """Monitoring targets page."""
+    targets = db.query(MonitoredTarget).all()
+    
+    return templates.TemplateResponse("monitoring.html", {
+        "request": request,
+        "targets": targets,
+        "current_page": "monitoring"
+    })
+
+
+@app.get("/backups", response_class=HTMLResponse)
+async def backups_page(request: Request, _: bool = Depends(verify_auth)):
+    """System backups page."""
+    backups = []
+    try:
+        backup_dir = "/backups"
+        if os.path.exists(backup_dir):
+            for f in os.listdir(backup_dir):
+                if f.endswith(".sql") or f.endswith(".tar.gz"):
+                    path = os.path.join(backup_dir, f)
+                    backups.append({
+                        "name": f,
+                        "size": f"{os.path.getsize(path) / 1024 / 1024:.2f} MB",
+                        "created": os.path.getctime(path)
+                    })
+        backups.sort(key=lambda x: x['created'], reverse=True)
+    except Exception as e:
+        logger.error(f"Backup error: {e}")
+    
+    return templates.TemplateResponse("backups.html", {
+        "request": request,
+        "backups": backups,
+        "current_page": "backups"
+    })
+
+
+@app.post("/login", response_class=RedirectResponse)
+async def login(request: Request, password: str = Form(...)):
+    """Handle login and set session cookie."""
     if verify_password(password, ADMIN_PASSWORD):
-        response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-        token = generate_token()
+        # Create persistent session
+        session_id = create_session("admin_user")
+        
+        response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
         response.set_cookie(
-            key="admin_token",
-            value=token,
+            key="session_id",
+            value=session_id,
             httponly=True,
-            secure=os.getenv("HTTPS_ENABLED", "false").lower() == "true",
             samesite="lax",
-            max_age=TOKEN_EXPIRY_HOURS * 3600
+            max_age=SESSION_TTL_HOURS * 3600
         )
-        logger.info("Admin login successful")
         return response
     
-    logger.warning("Failed login attempt")
-    return RedirectResponse(url="/?error=Invalid+Password", status_code=status.HTTP_303_SEE_OTHER)
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "error": "Invalid password"
+    })
 
 
 @app.post("/logout")
-async def logout():
-    """Handle logout."""
-    response = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
-    response.delete_cookie("admin_token")
+async def logout(request: Request):
+    """Clear session and redirect to login."""
+    response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+    
+    # Optional: Delete from Redis explicitly
+    signed_session_id = request.cookies.get("session_id")
+    if signed_session_id:
+        try:
+            session_id = signer.unsign(signed_session_id).decode('utf-8')
+            redis_client.delete(f"session:{session_id}")
+        except:
+            pass
+            
+    response.delete_cookie("session_id")
     return response
+
+
+@app.get("/api/workstation-ranges")
+async def get_workstation_ranges(db: Session = Depends(get_db), _: bool = Depends(verify_auth)):
+    """Get all configured workstation ranges (JSON)."""
+    ranges = db.query(WorkstationRange).filter(WorkstationRange.is_active == True).all()
+    return [{
+        "id": r.id,
+        "prefix": r.prefix,
+        "start": r.range_start,
+        "end": r.range_end,
+        "description": r.description
+    } for r in ranges]
+
+@app.get("/api/free-workstations", response_class=HTMLResponse)
+async def get_free_workstations(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_auth)
+):
+    """
+    Calculate free workstations SERVER-SIDE and return HTML partial.
+    
+    **Why Server-Side?**
+    - Prevents UI freeze on large datasets
+    - Shows loading spinner during calculation
+    - Clean separation of concerns
+    
+    **Usage:** Called via HTMX lazy load: hx-get="/api/free-workstations" hx-trigger="load"
+    """
+    # 1. Get all active ranges
+    ranges = db.query(WorkstationRange).filter(WorkstationRange.is_active == True).all()
+    
+    # 2. Get all occupied workstations
+    occupied_ws = set()
+    employees = db.query(Employee).filter(Employee.workstation.isnot(None)).all()
+    for emp in employees:
+        if emp.workstation:
+            occupied_ws.add(emp.workstation.strip().upper())
+    
+    # 3. Calculate free workstations per prefix
+    groups = []
+    for r in ranges:
+        prefix = r.prefix.upper()
+        all_ws_in_range = [f"{prefix}{i}" for i in range(r.range_start, r.range_end + 1)]
+        free_ws = [ws for ws in all_ws_in_range if ws not in occupied_ws]
+        
+        groups.append({
+            "prefix": prefix,
+            "ids": free_ws,
+            "total": len(all_ws_in_range),
+            "range": f"{r.range_start}-{r.range_end}"
+        })
+    
+    # 4. Return HTML partial (for HTMX swap)
+    return templates.TemplateResponse("partials/free_ws.html", {
+        "request": request,
+        "groups": groups
+    })
+
+@app.post("/api/workstation-ranges")
+async def create_workstation_range(
+    prefix: str = Form(...),
+    start: int = Form(...),
+    end: int = Form(...),
+    description: str = Form(None),
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_auth)
+):
+    """Create a new workstation range."""
+    new_range = WorkstationRange(
+        prefix=prefix.upper(),
+        range_start=start,
+        range_end=end,
+        description=description
+    )
+    db.add(new_range)
+    db.commit()
+    return {"status": "success"}
+
+@app.delete("/api/workstation-ranges/{range_id}")
+async def delete_workstation_range(range_id: int, db: Session = Depends(get_db), _: bool = Depends(verify_auth)):
+    """Delete (deactivate) a workstation range."""
+    r = db.query(WorkstationRange).filter(WorkstationRange.id == range_id).first()
+    if r:
+        r.is_active = False
+        db.commit()
+    return {"status": "success"}
 
 
 # --- Container Operations ---
@@ -486,15 +741,30 @@ def parse_fio(full_name: str) -> tuple[Optional[str], Optional[str], Optional[st
 async def inventory_page(
     request: Request,
     search: Optional[str] = Query(None, max_length=100),
-    sort: Optional[str] = Query(None, max_length=50),
+    sort: Optional[str] = Query(None, max_length=50),  # None = use default
     order: Literal["asc", "desc"] = "asc",
+    department: Optional[str] = Query(None, max_length=100),  # None/empty = ALL
+    company: Optional[str] = Query(None, max_length=100),
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db),
     _: bool = Depends(verify_auth)
 ):
-    """Inventory Grid UI V2.0 - with sorting and expandable rows."""
+    """
+    Inventory Grid UI V3.1 - Server-Side Rendering & HTMX.
+    
+    **Defaults:**
+    - Department: ALL (no filter)
+    - Sort: ID ASC (stable, predictable)
+    - Pagination: 50 items per page
+    
+    **Performance:**
+    - Server-side filtering/sorting/pagination
+    - Returns full page or HTMX partial (table rows only)
+    """
     query = db.query(Employee)
     
-    # Search filter - search in all name parts and other fields
+    # 1. Filtering
     if search:
         search_filter = f"%{search}%"
         query = query.filter(
@@ -510,8 +780,19 @@ async def inventory_page(
             (Employee.email.ilike(search_filter))
         )
     
-    # Validate and apply sorting (whitelist approach)
-    validated_sort = SortColumn.validate(sort)
+    # Department Filter: Only apply if explicitly provided and not empty
+    if department and department.strip():
+        if department == 'Factory':
+             query = query.filter(Employee.department.ilike("%Factory%"))
+        else:
+             query = query.filter(Employee.department == department)
+             
+    # Company Filter: Only apply if explicitly provided and not 'all'
+    if company and company != 'all':
+        query = query.filter(Employee.company == company)
+
+    # 2. Sorting - Default to ID ASC for stability
+    validated_sort = SortColumn.validate(sort) if sort else None
     if validated_sort:
         sort_column = getattr(Employee, validated_sort, None)
         if sort_column is not None:
@@ -519,16 +800,22 @@ async def inventory_page(
                 query = query.order_by(sort_column.desc())
             else:
                 query = query.order_by(sort_column.asc())
+        else:
+            # Fallback to ID if column lookup fails
+            query = query.order_by(Employee.id.asc())
     else:
-        # Default sort by last_name, first_name
-        query = query.order_by(Employee.last_name, Employee.first_name)
+        # Default: Sort by ID ASC (Stable, Predictable)
+        query = query.order_by(Employee.id.asc())
+
+    # 3. Pagination
+    total_count = query.count()
+    total_pages = (total_count + limit - 1) // limit
     
-    employees = query.limit(2000).all()
+    employees_rows = query.offset((page - 1) * limit).limit(limit).all()
     
-    # Convert to JSON-serializable format for Alpine.js
-    employees_data = []
-    for e in employees:
-        employees_data.append({
+    employees = []
+    for e in employees_rows:
+        employees.append({
             "id": e.id,
             "full_name": e.full_name,
             "company": e.company,
@@ -544,20 +831,34 @@ async def inventory_page(
             "specs_ram": e.specs_ram,
             "monitor": e.monitor,
             "ups": e.ups,
-            "has_ad": e.has_ad or False,
-            "has_drweb": e.has_drweb or False,
-            "has_zabbix": e.has_zabbix or False,
+            "has_ad": e.has_ad,
+            "has_drweb": e.has_drweb,
+            "has_zabbix": e.has_zabbix,
             "ad_login": e.ad_login,
             "notes": e.notes,
-            "is_active": e.is_active if e.is_active is not None else True
+            "is_active": e.is_active
         })
     
+    # 4. HTMX Partial Response (Table Rows Only)
+    if request.headers.get("HX-Request") and request.headers.get("HX-Target") == "inventory-table-body":
+        return templates.TemplateResponse("partials/inventory_rows.html", {
+            "request": request, 
+            "employees": employees
+        })
+
+    # 5. Full Page Response
     return templates.TemplateResponse("inventory.html", {
         "request": request,
-        "employees": employees_data,
+        "employees": employees,
         "search": search or "",
-        "sort": sort or "",
+        "sort": sort or "id",  # Default display: "id"
         "order": order,
+        "department": department or "",  # Empty = ALL
+        "company": company or "all",
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages,
+        "total_count": total_count,
         "current_page": "inventory"
     })
 
