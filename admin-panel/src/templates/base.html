@@ -29,7 +29,9 @@
         }
     </script>
 
-    <!-- Alpine.js -->
+    <!-- HTMX & Alpine Plugins -->
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/persist@3.x.x/dist/cdn.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js"></script>
     
     <!-- Inter Font -->
@@ -39,29 +41,83 @@
     <script src="https://unpkg.com/heroicons@2.0.18/24/outline/index.js"></script>
 
     {% block extra_head %}{% endblock %}
-</head>
-<body class="h-full bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-200" x-data="layout()" @notify.window="showToast($event.detail.message, $event.detail.type)">
+    
+    <style>
+        [x-cloak] { display: none !important; }
+        
+        /* CSS Variables for Sidebar Width */
+        :root {
+            --sidebar-width-expanded: 18rem; /* w-72 */
+            --sidebar-width-collapsed: 5rem; /* w-20 */
+            --sidebar-width: var(--sidebar-width-expanded);
+        }
+        
+        body.sidebar-collapsed {
+            --sidebar-width: var(--sidebar-width-collapsed);
+        }
 
-    <!-- Sidebar / Drawer -->
-    <div x-show="sidebarOpen" class="relative z-50 lg:hidden" role="dialog" aria-modal="true">
+        /* Sidebar Container - Logic in CSS, not just classes */
+        .sidebar-container {
+            width: var(--sidebar-width);
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            contain: layout style paint;
+            /* Transition only on explicit toggle, not load */
+            transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1); 
+        }
+        
+        /* Main Content Shell */
+        .main-shell {
+            padding-left: 0;
+            transition: padding-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        @media (min-width: 1024px) {
+            .main-shell {
+                padding-left: var(--sidebar-width);
+            }
+        }
+        
+        /* Disable transitions on initial load or if user prefers reduced motion */
+        .no-transition, .no-transition * {
+            transition: none !important;
+        }
+        
+        /* Smooth text fade */
+        .sidebar-text {
+            transition: opacity 0.2s ease-in-out;
+            opacity: 1;
+        }
+        
+        body.sidebar-collapsed .sidebar-text {
+            opacity: 0;
+            pointer-events: none;
+            width: 0;
+            overflow: hidden;
+        }
+    </style>
+</head>
+    <body class="h-full bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-200" 
+      x-data="layout()" 
+      @notify.window="showToast($event.detail.message, $event.detail.type)"
+      @confirm-action.window="openConfirm($event.detail)"
+      hx-boost="true"
+      :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+
+    <!-- Sidebar / Drawer (Mobile) -->
+    <div x-show="sidebarOpen" class="relative z-50 lg:hidden" role="dialog" aria-modal="true" style="display: none;" :style="sidebarOpen ? 'display: block' : 'display: none'">
         <div x-show="sidebarOpen" 
-             x-transition:enter="transition-opacity ease-linear duration-300"
-             x-transition:enter-start="opacity-0"
-             x-transition:enter-end="opacity-100"
-             x-transition:leave="transition-opacity ease-linear duration-300"
-             x-transition:leave-start="opacity-100"
-             x-transition:leave-end="opacity-0"
-             class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm"></div>
+             class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm"
+             style="display: none;"
+             :style="sidebarOpen ? 'display: block' : 'display: none'"></div>
 
         <div class="fixed inset-0 flex">
             <div x-show="sidebarOpen" 
-                 x-transition:enter="transition ease-in-out duration-300 transform"
-                 x-transition:enter-start="-translate-x-full"
-                 x-transition:enter-end="translate-x-0"
-                 x-transition:leave="transition ease-in-out duration-300 transform"
-                 x-transition:leave-start="translate-x-0"
-                 x-transition:leave-end="-translate-x-full"
                  class="relative mr-16 flex w-full max-w-xs flex-1" 
+                 style="display: none;"
+                 :style="sidebarOpen ? 'display: block' : 'display: none'"
                  @click.away="sidebarOpen = false">
                 
                 <div class="absolute left-full top-0 flex w-16 justify-center pt-5">
@@ -83,7 +139,6 @@
                             <li>
                                 <ul role="list" class="-mx-2 space-y-1">
                                     {% include "sidebar_links.html" ignore missing %}
-                                    <!-- Fallback links if include fails or for simplicity -->
                                     <li>
                                         <a href="/" class="group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold"
                                            :class="currentPage === 'dashboard' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'">
@@ -102,6 +157,24 @@
                                             Inventory
                                         </a>
                                     </li>
+                                    <li>
+                                        <a href="/monitoring" class="group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold"
+                                           :class="currentPage === 'monitoring' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'">
+                                            <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            Monitoring
+                                        </a>
+                                    </li>
+                                    <li>
+                                        <a href="/backups" class="group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold"
+                                           :class="currentPage === 'backups' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'">
+                                            <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                                            </svg>
+                                            Backups
+                                        </a>
+                                    </li>
                                 </ul>
                             </li>
                         </ul>
@@ -111,46 +184,97 @@
         </div>
     </div>
 
-    <!-- Static Sidebar for Desktop -->
-    <div class="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:w-72 lg:flex-col">
-        <div class="flex grow flex-col gap-y-5 overflow-y-auto bg-slate-900 px-6 pb-4 border-r border-slate-700">
-            <div class="flex h-16 shrink-0 items-center">
-                 <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center mr-3">
+    <!-- Static Sidebar for Desktop (Collapsible) -->
+    <div class="hidden lg:fixed lg:inset-y-0 lg:z-50 lg:flex lg:flex-col sidebar-container bg-slate-900 border-r border-slate-700">
+        
+        <div class="flex grow flex-col gap-y-5 overflow-y-auto pb-4" :class="sidebarCollapsed ? 'px-2' : 'px-6'">
+            <!-- Logo Area -->
+            <div class="flex h-16 shrink-0 items-center" :class="sidebarCollapsed ? 'justify-center' : ''">
+                 <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center shrink-0" :class="sidebarCollapsed ? '' : 'mr-3'">
                     <span class="text-white font-bold text-sm">NA</span>
                 </div>
-                <span class="text-xl font-bold text-white">NetAdmin</span>
+                <span class="text-xl font-bold text-white sidebar-text">NetAdmin</span>
             </div>
+            
             <nav class="flex flex-1 flex-col">
                 <ul role="list" class="flex flex-1 flex-col gap-y-7">
                     <li>
                         <ul role="list" class="-mx-2 space-y-1">
                             <li>
-                                <a href="/" class="group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold transition-colors"
-                                   :class="currentPage === 'dashboard' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'">
-                                    <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                                        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-                                    </svg>
-                                    Dashboard
-                                </a>
+                                        <a href="/" class="group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold transition-colors"
+                                           :class="[
+                                               currentPage === 'dashboard' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white hover:bg-slate-800',
+                                               sidebarCollapsed ? 'justify-center' : ''
+                                           ]"
+                                           :title="sidebarCollapsed ? 'Dashboard' : ''">
+                                            <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+                                            </svg>
+                                            <span class="whitespace-nowrap sidebar-text">Dashboard</span>
+                                        </a>
                             </li>
                             <li>
                                 <a href="/inventory" class="group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold transition-colors"
-                                   :class="currentPage === 'inventory' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white hover:bg-slate-800'">
+                                   :class="[
+                                       currentPage === 'inventory' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white hover:bg-slate-800',
+                                       sidebarCollapsed ? 'justify-center' : ''
+                                   ]"
+                                   :title="sidebarCollapsed ? 'Inventory' : ''">
                                     <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" />
                                     </svg>
-                                    Inventory
+                                    <span class="whitespace-nowrap sidebar-text">Inventory</span>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="/monitoring" class="group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold transition-colors"
+                                   :class="[
+                                       currentPage === 'monitoring' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white hover:bg-slate-800',
+                                       sidebarCollapsed ? 'justify-center' : ''
+                                   ]"
+                                   :title="sidebarCollapsed ? 'Monitoring' : ''">
+                                    <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <span class="whitespace-nowrap sidebar-text">Monitoring</span>
+                                </a>
+                            </li>
+                            <li>
+                                <a href="/backups" class="group flex gap-x-3 rounded-md p-2 text-sm leading-6 font-semibold transition-colors"
+                                   :class="[
+                                       currentPage === 'backups' ? 'bg-slate-800 text-indigo-400' : 'text-slate-400 hover:text-white hover:bg-slate-800',
+                                       sidebarCollapsed ? 'justify-center' : ''
+                                   ]"
+                                   :title="sidebarCollapsed ? 'Backups' : ''">
+                                    <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                                    </svg>
+                                    <span class="whitespace-nowrap sidebar-text">Backups</span>
                                 </a>
                             </li>
                         </ul>
                     </li>
-                    <li class="mt-auto">
+                    <li class="mt-auto space-y-2">
+                        <!-- Collapse Toggle Button -->
+                        <button @click="toggleSidebar()" 
+                                class="group flex gap-x-3 rounded-md p-2 text-sm font-semibold leading-6 text-slate-400 hover:bg-slate-800 hover:text-white w-full transition-colors"
+                                :class="sidebarCollapsed ? 'justify-center' : ''"
+                                :title="sidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'">
+                            <svg class="h-6 w-6 shrink-0 transition-transform duration-300" :class="sidebarCollapsed ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M18.75 19.5l-7.5-7.5 7.5-7.5m-6 15L5.25 12l7.5-7.5" />
+                            </svg>
+                            <span class="whitespace-nowrap sidebar-text">Collapse</span>
+                        </button>
+
                         <form action="/logout" method="post">
-                            <button type="submit" class="group -mx-2 flex gap-x-3 rounded-md p-2 text-sm font-semibold leading-6 text-slate-400 hover:bg-slate-800 hover:text-white w-full">
+                            <button type="submit" 
+                                    class="group flex gap-x-3 rounded-md p-2 text-sm font-semibold leading-6 text-slate-400 hover:bg-slate-800 hover:text-white w-full transition-colors"
+                                    :class="sidebarCollapsed ? 'justify-center' : ''"
+                                    :title="sidebarCollapsed ? 'Logout' : ''">
                                 <svg class="h-6 w-6 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
                                 </svg>
-                                Logout
+                                <span class="whitespace-nowrap sidebar-text">Logout</span>
                             </button>
                         </form>
                     </li>
@@ -160,7 +284,7 @@
     </div>
 
     <!-- Main Content Shell -->
-    <div class="lg:pl-72">
+    <div class="main-shell">
         <div class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8">
             <button type="button" class="-m-2.5 p-2.5 text-slate-700 dark:text-slate-200 lg:hidden" @click="sidebarOpen = true">
                 <span class="sr-only">Open sidebar</span>
@@ -202,10 +326,12 @@
                 <!-- Theme Toggle -->
                 <button @click="toggleTheme()" class="-m-2.5 p-2.5 text-slate-400 hover:text-slate-500 dark:text-slate-400 dark:hover:text-slate-300">
                     <span class="sr-only">Switch theme</span>
-                    <svg x-show="!darkMode" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                    <!-- Moon icon (show in light mode) -->
+                    <svg x-show="!darkMode" style="display: none;" :style="!darkMode ? 'display: block' : 'display: none'" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z" />
                     </svg>
-                    <svg x-show="darkMode" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="display: none;">
+                    <!-- Sun icon (show in dark mode) -->
+                    <svg x-show="darkMode" style="display: none;" :style="darkMode ? 'display: block' : 'display: none'" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z" />
                     </svg>
                 </button>
@@ -230,18 +356,13 @@
 
                     <div x-show="open" 
                          @click.away="open = false"
-                         x-transition:enter="transition ease-out duration-100"
-                         x-transition:enter-start="transform opacity-0 scale-95"
-                         x-transition:enter-end="transform opacity-100 scale-100"
-                         x-transition:leave="transition ease-in duration-75"
-                         x-transition:leave-start="transform opacity-100 scale-100"
-                         x-transition:leave-end="transform opacity-0 scale-95"
                          class="absolute right-0 z-10 mt-2.5 w-32 origin-top-right rounded-md bg-white dark:bg-slate-800 py-2 shadow-lg ring-1 ring-slate-900/5 dark:ring-slate-700 focus:outline-none" 
                          role="menu" 
                          aria-orientation="vertical" 
                          aria-labelledby="user-menu-button" 
                          tabindex="-1"
-                         style="display: none;">
+                         style="display: none;"
+                         :style="open ? 'display: block' : 'display: none'">
                         <a href="#" class="block px-3 py-1 text-sm leading-6 text-slate-900 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700" role="menuitem" tabindex="-1" id="user-menu-item-0">Your Profile</a>
                         <form action="/logout" method="post">
                             <button type="submit" class="block w-full text-left px-3 py-1 text-sm leading-6 text-slate-900 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700" role="menuitem" tabindex="-1" id="user-menu-item-1">Sign out</button>
@@ -258,35 +379,182 @@
         </main>
     </div>
 
-    <!-- Toast Notification (Reused Logic) -->
-    <div x-show="toast.show" 
-         x-transition:enter="transition ease-out duration-300"
-         x-transition:enter-start="opacity-0 translate-y-2"
-         x-transition:enter-end="opacity-100 translate-y-0"
-         x-transition:leave="transition ease-in duration-200"
-         x-transition:leave-start="opacity-100"
-         x-transition:leave-end="opacity-0"
+    <!-- Global Confirmation Modal -->
+    <div id="global-confirm-modal"
+         x-show="confirmModal.open" 
+         class="relative z-[100]"
+         style="display: none;"
+         :style="confirmModal.open ? 'display: block' : 'display: none'"
+         x-cloak>
+        <!-- Backdrop: Click to close -->
+        <div class="fixed inset-0 bg-slate-900/75 backdrop-blur-sm" 
+             @click="confirmModal.open = false"></div>
+
+        <div class="fixed inset-0 z-10 w-screen overflow-y-auto pointer-events-none">
+            <div class="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0 pointer-events-none">
+                <!-- Modal Content: pointer-events-auto to allow button clicks -->
+                <div class="relative transform overflow-hidden rounded-xl bg-white dark:bg-slate-800 text-left shadow-2xl sm:my-8 sm:w-full sm:max-w-lg border border-slate-200 dark:border-slate-700 pointer-events-auto">
+                    <div class="bg-white dark:bg-slate-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
+                        <div class="sm:flex sm:items-start">
+                            <div class="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30 sm:mx-0 sm:h-10 sm:w-10">
+                                <svg class="h-6 w-6 text-red-600 dark:text-red-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                                </svg>
+                            </div>
+                            <div class="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left">
+                                <h3 class="text-base font-semibold leading-6 text-slate-900 dark:text-slate-100">Confirm Deletion</h3>
+                                <div class="mt-2">
+                                    <p class="text-sm text-slate-500 dark:text-slate-400" x-text="confirmModal.message || 'Are you sure you want to delete this item? This action cannot be undone.'"></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-slate-900/50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6 gap-3">
+                        <button type="button" 
+                                id="global-confirm-delete-btn"
+                                @click="executeDelete()"
+                                class="inline-flex w-full justify-center rounded-md bg-red-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 sm:w-auto transition-colors">
+                            Delete Permanently
+                        </button>
+                        <button type="button" 
+                                @click="confirmModal.open = false"
+                                class="mt-3 inline-flex w-full justify-center rounded-md bg-white dark:bg-slate-800 px-3 py-2 text-sm font-semibold text-slate-900 dark:text-slate-200 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 sm:mt-0 sm:w-auto transition-colors">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification (No Alpine x-show to avoid "u is not a function") -->
+    <div id="global-toast" 
          class="fixed bottom-5 right-5 z-50 max-w-sm w-full bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-4"
          style="display: none;">
-         <!-- Toast Content Matches Original Logic -->
          <div class="flex items-start">
              <div class="flex-shrink-0">
-                 <svg x-show="toast.type === 'success'" class="h-6 w-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                 <svg x-show="toast.type === 'error'" class="h-6 w-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                 <svg id="toast-icon-success" class="h-6 w-6 text-green-400" style="display: none;" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                 <svg id="toast-icon-error" class="h-6 w-6 text-red-400" style="display: none;" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
              </div>
              <div class="ml-3 w-0 flex-1">
-                 <p class="text-sm font-medium text-slate-900 dark:text-slate-100" x-text="toast.message"></p>
+                 <p id="toast-message" class="text-sm font-medium text-slate-900 dark:text-slate-100"></p>
              </div>
          </div>
     </div>
 
     <script>
+        // Pre-flight check to set sidebar state immediately
+        (function() {
+            if (localStorage.getItem('sidebarCollapsed') === 'true') {
+                document.body.classList.add('sidebar-collapsed');
+            }
+        })();
+        
+        // Global delete confirmation handler (works WITHOUT Alpine)
+        // Only define once to prevent duplicate listeners
+        if (!window.triggerDeleteConfirm) {
+            window.triggerDeleteConfirm = function(url, target, message) {
+                // Dispatch custom event that Alpine will catch
+                const event = new CustomEvent('confirm-action', {
+                    detail: { url, target, message }
+                });
+                window.dispatchEvent(event);
+            };
+            
+            // Fallback: If Alpine hasn't loaded yet, listen for events directly
+            document.addEventListener('confirm-action', function(event) {
+                // Try to call Alpine's openConfirm if available
+                const layoutEl = document.querySelector('[x-data]');
+                if (layoutEl && layoutEl._x_dataStack && layoutEl._x_dataStack[0]) {
+                    const layoutData = layoutEl._x_dataStack[0];
+                    if (layoutData.openConfirm) {
+                        layoutData.openConfirm(event.detail);
+                    }
+                }
+            }, { once: false });
+        }
+        
+        // HTMX/Alpine Bridge - SELECTIVE re-initialization after HTMX swaps
+        document.addEventListener('DOMContentLoaded', () => {
+            // Listen for HTMX afterSwap event
+            document.body.addEventListener('htmx:afterSwap', (event) => {
+                // ONLY re-init Alpine if the swapped element has x-data attribute
+                // This prevents duplicate event listeners on existing elements
+                if (window.Alpine && event.detail.target) {
+                    const targetElement = event.detail.target;
+                    
+                    // Find all NEW elements with x-data inside the swapped content
+                    const newAlpineElements = targetElement.querySelectorAll('[x-data]');
+                    
+                    if (newAlpineElements.length > 0) {
+                        newAlpineElements.forEach(el => {
+                            // Only init if not already initialized
+                            if (!el._x_dataStack) {
+                                Alpine.initTree(el);
+                            }
+                        });
+                    }
+                    
+                    // If the target itself has x-data and isn't initialized
+                    if (targetElement.hasAttribute && targetElement.hasAttribute('x-data') && !targetElement._x_dataStack) {
+                        Alpine.initTree(targetElement);
+                    }
+                }
+            });
+            
+            // Listen for HTMX afterSettle to re-apply theme/sidebar and update currentPage
+            document.body.addEventListener('htmx:afterSettle', (event) => {
+                
+                // Re-apply dark mode from localStorage (CRITICAL for tab switching)
+                const isDark = localStorage.getItem('theme') === 'dark' || 
+                              (!localStorage.getItem('theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                if (isDark) {
+                    document.documentElement.classList.add('dark');
+                } else {
+                    document.documentElement.classList.remove('dark');
+                }
+                
+                // Re-apply sidebar collapsed state
+                if (localStorage.getItem('sidebarCollapsed') === 'true') {
+                    document.body.classList.add('sidebar-collapsed');
+                } else {
+                    document.body.classList.remove('sidebar-collapsed');
+                }
+                
+                // Update currentPage based on URL
+                const path = window.location.pathname;
+                let pageName = 'dashboard';
+                if (path.includes('/inventory')) pageName = 'inventory';
+                else if (path.includes('/monitoring')) pageName = 'monitoring';
+                else if (path.includes('/backups')) pageName = 'backups';
+                
+                // Update Alpine component if it exists
+                const layoutEl = document.querySelector('[x-data]');
+                if (layoutEl && layoutEl._x_dataStack) {
+                    const layoutData = layoutEl._x_dataStack[0];
+                    if (layoutData && layoutData.currentPage !== pageName) {
+                        layoutData.currentPage = pageName;
+                    }
+                }
+            });
+        });
+        
         function layout() {
             return {
                 sidebarOpen: false,
+                sidebarCollapsed: Alpine.$persist(false).as('sidebarCollapsed'),
                 darkMode: localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches),
                 currentPage: '{{ current_page|default("dashboard") }}',
-                toast: { show: false, message: '', type: 'success' },
+                
+                // Confirm Modal State
+                confirmModal: {
+                    open: false,
+                    message: '',
+                    url: '',
+                    target: '',
+                    method: 'DELETE',
+                    deleting: false
+                },
                 
                 init() {
                     this.$watch('darkMode', val => {
@@ -295,17 +563,373 @@
                         else document.documentElement.classList.remove('dark');
                     });
                 },
+
+                openConfirm(detail) {
+                    this.confirmModal.message = detail.message || 'Are you sure you want to delete this item? This action cannot be undone.';
+                    this.confirmModal.url = detail.url;
+                    this.confirmModal.target = detail.target;
+                    this.confirmModal.method = detail.method || 'DELETE';
+                    this.confirmModal.open = true;
+                },
+                
+                async executeDelete() {
+                    // Prevent double-click
+                    if (this.confirmModal.deleting) return;
+                    this.confirmModal.deleting = true;
+                    
+                    try {
+                        const targetEl = document.querySelector(this.confirmModal.target);
+                        
+                        // Check if element already deleted
+                        if (!targetEl) {
+                            // BYPASS Alpine: Direct DOM manipulation
+                            document.getElementById('global-confirm-modal').style.display = 'none';
+                            this.confirmModal.deleting = false;
+                            return;
+                        }
+                        
+                        const response = await fetch(this.confirmModal.url, {
+                            method: this.confirmModal.method,
+                            headers: {
+                                'HX-Request': 'true'
+                            }
+                        });
+                        
+                        if (response.ok) {
+                            // BYPASS Alpine transition system entirely
+                            // Direct DOM manipulation to hide modal instantly
+                            const modalEl = document.getElementById('global-confirm-modal');
+                            if (modalEl) {
+                                modalEl.style.display = 'none';
+                            }
+                            
+                            // Reset Alpine state AFTER DOM is hidden (non-reactive)
+                            this.confirmModal.open = false;
+                            
+                            // Then fade out and remove element
+                            targetEl.style.transition = 'opacity 0.3s ease-out';
+                            targetEl.style.opacity = '0';
+                            setTimeout(() => {
+                                targetEl.remove();
+                                this.showToast('Deleted successfully', 'success');
+                            }, 300);
+                        } else {
+                            throw new Error('Delete failed: ' + response.status);
+                        }
+                    } catch (e) {
+                        console.error('[Delete Error]', e);
+                        this.showToast('Error: ' + e.message, 'error');
+                    } finally {
+                        this.confirmModal.deleting = false;
+                    }
+                },
                 
                 toggleTheme() {
                     this.darkMode = !this.darkMode;
                 },
+                
+                toggleSidebar() {
+                    // Toggle collapsed state
+                    this.sidebarCollapsed = !this.sidebarCollapsed;
+                    
+                    // Manually update body class for immediate effect
+                    if (this.sidebarCollapsed) {
+                        document.body.classList.add('sidebar-collapsed');
+                    } else {
+                        document.body.classList.remove('sidebar-collapsed');
+                    }
+                    
+                    console.log('[Sidebar] Collapsed:', this.sidebarCollapsed);
+                },
 
                 showToast(message, type = 'success') {
-                    this.toast = { show: true, message, type };
-                    setTimeout(() => this.toast.show = false, 3000);
+                    const toast = document.getElementById('global-toast');
+                    const messageEl = document.getElementById('toast-message');
+                    const successIcon = document.getElementById('toast-icon-success');
+                    const errorIcon = document.getElementById('toast-icon-error');
+                    
+                    if (!toast) return;
+                    
+                    messageEl.textContent = message;
+                    successIcon.style.display = type === 'success' ? 'block' : 'none';
+                    errorIcon.style.display = type === 'error' ? 'block' : 'none';
+                    
+                    toast.style.display = 'block';
+                    
+                    setTimeout(() => {
+                        toast.style.display = 'none';
+                    }, 3000);
                 }
             }
         }
+
+        // --- Inventory App Logic (Global for HTMX compatibility) ---
+        function inventoryApp() {
+            return {
+                // UI State
+                activeTab: 'inventory',
+                filters: { department: '' },
+                
+                // Drawer State
+                drawerOpen: false,
+                editMode: false,
+                selectedEmployee: null,
+                drawerActiveTab: 'general',
+                
+                // Workstation Config
+                ranges: [],
+                configModalOpen: false,
+                newRange: { prefix: '', start: 1, end: 100, description: '' },
+                
+                init() {
+                    console.log('[Inventory] Initializing Global Component');
+                    
+                    // Listen for global notifications
+                    window.addEventListener('notify', (e) => {
+                        this.showToast(e.detail.message, e.detail.type);
+                    });
+                },
+                
+                // --- Filters (UI Only) ---
+                setFilter(key, value) {
+                    if (key === 'department') {
+                        this.filters.department = value;
+                    }
+                },
+
+                sortBy(field) {
+                    // Legacy function
+                },
+
+                // --- Workstation Ranges Config ---
+                async fetchRanges() {
+                    try {
+                        const res = await fetch('/api/workstation-ranges');
+                        if (res.ok) {
+                            this.ranges = await res.json();
+                        }
+                    } catch (e) {
+                        console.error('Failed to fetch ranges', e);
+                    }
+                },
+                
+                async addRange() {
+                    try {
+                        const formData = new FormData();
+                        formData.append('prefix', this.newRange.prefix);
+                        formData.append('start', this.newRange.start);
+                        formData.append('end', this.newRange.end);
+                        if (this.newRange.description) formData.append('description', this.newRange.description);
+                        
+                        const res = await fetch('/api/workstation-ranges', { method: 'POST', body: formData });
+                        if (res.ok) {
+                            this.newRange = { prefix: '', start: 1, end: 100, description: '' };
+                            this.fetchRanges();
+                            this.showToast('Range added', 'success');
+                            if (this.activeTab === 'free_ws') {
+                                htmx.ajax('GET', '/api/free-workstations', { target: '#free-ws-container' });
+                            }
+                        }
+                    } catch (e) {
+                        this.showToast('Error adding range', 'error');
+                    }
+                },
+                
+                async deleteRange(id) {
+                    if (!confirm('Are you sure?')) return;
+                    try {
+                        const res = await fetch(`/api/workstation-ranges/${id}`, { method: 'DELETE' });
+                        if (res.ok) {
+                            this.fetchRanges();
+                            this.showToast('Range deleted', 'success');
+                            if (this.activeTab === 'free_ws') {
+                                htmx.ajax('GET', '/api/free-workstations', { target: '#free-ws-container' });
+                            }
+                        }
+                    } catch (e) {
+                        this.showToast('Error deleting range', 'error');
+                    }
+                },
+
+                // --- Drawer & Helpers ---
+                openDrawer(employee) {
+                    if (employee) {
+                        this.selectedEmployee = JSON.parse(JSON.stringify(employee));
+                        this.editMode = false;
+                    } else {
+                        this.selectedEmployee = this.getEmptyEmployee();
+                        this.editMode = true;
+                    }
+                    this.drawerActiveTab = 'general';
+                    this.drawerOpen = true;
+                },
+                
+                getEmptyEmployee() {
+                    return {
+                        id: null,
+                        full_name: '',
+                        company: 'MOBI',
+                        department: '',
+                        location: '',
+                        internal_phone: '',
+                        phone_type: 'NONE',
+                        workstation: '',
+                        device_type: 'PC',
+                        specs_cpu: '',
+                        specs_gpu: '',
+                        specs_ram: '',
+                        monitor: '',
+                        ups: '',
+                        has_ad: false,
+                        has_drweb: false,
+                        has_zabbix: false,
+                        ad_login: '',
+                        email: '',
+                        notes: '',
+                        is_active: true
+                    };
+                },
+                
+                getInitials(name) {
+                    if (!name) return '?';
+                    const parts = name.split(' ');
+                    if (parts.length >= 2) {
+                        return (parts[0][0] + parts[1][0]).toUpperCase();
+                    }
+                    return name.substring(0, 2).toUpperCase();
+                },
+                
+                getDeviceIcon(type) {
+                    const icons = { 'Laptop': '💻', 'PC': '🖥️', 'Monoblock': '🖥', 'Server': '🗄️', 'Other': '📦' };
+                    return icons[type] || '📦';
+                },
+
+                async saveEmployee() {
+                    const url = this.selectedEmployee.id ? `/api/employees/${this.selectedEmployee.id}` : '/api/employees';
+                    const method = this.selectedEmployee.id ? 'PATCH' : 'POST';
+                    
+                    const headers = {};
+                    let body;
+
+                    if (method === 'PATCH') {
+                        headers['Content-Type'] = 'application/json';
+                        body = JSON.stringify(this.selectedEmployee);
+                    } else {
+                        const formData = new FormData();
+                        for (const key in this.selectedEmployee) {
+                            if (this.selectedEmployee[key] !== null) {
+                                formData.append(key, this.selectedEmployee[key]);
+                            }
+                        }
+                        body = formData;
+                    }
+                    
+                    try {
+                        const res = await fetch(url, { method, headers, body });
+                        if (res.ok) {
+                            this.showToast('Employee saved', 'success');
+                            this.drawerOpen = false;
+                            htmx.ajax('GET', '/inventory', {target:'#inventory-table-body', source: '#inventory-table-body'});
+                        } else {
+                            const err = await res.json();
+                            this.showToast(err.detail || 'Error saving', 'error');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        this.showToast('Network error', 'error');
+                    }
+                },
+                
+                async deleteEmployee() {
+                    if (!confirm('Delete this employee?')) return;
+                    try {
+                        const res = await fetch(`/api/employees/${this.selectedEmployee.id}`, { method: 'DELETE' });
+                        if (res.ok) {
+                            this.showToast('Employee deleted', 'success');
+                            this.drawerOpen = false;
+                            htmx.ajax('GET', '/inventory', {target:'#inventory-table-body', source: '#inventory-table-body'});
+                        }
+                    } catch (e) {
+                        this.showToast('Error deleting', 'error');
+                    }
+                },
+
+                copyToClipboard(text) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        this.showToast('Copied: ' + text, 'success');
+                    });
+                },
+
+                showToast(message, type) {
+                    window.dispatchEvent(new CustomEvent('notify', { detail: { message, type } }));
+                }
+            }
+        }
+
+        function monitoring() {
+            return {
+                modalOpen: false,
+                async submitTarget(e) {
+                    const formData = new FormData(e.target);
+                    try {
+                        const response = await fetch('/api/targets', { method: 'POST', body: formData });
+                        if (response.ok) {
+                            window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'Target added successfully', type: 'success' } }));
+                            this.modalOpen = false;
+                            setTimeout(() => location.reload(), 500);
+                        } else {
+                            window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'Failed to add target', type: 'error' } }));
+                        }
+                    } catch (e) {
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'Error: ' + e.message, type: 'error' } }));
+                    }
+                },
+                async deleteTarget(id, name) {
+                    if (!confirm(`Delete monitoring target "${name}"?`)) return;
+                    try {
+                        const response = await fetch(`/api/targets/${id}`, { method: 'DELETE' });
+                        if (response.ok) {
+                            window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'Target deleted', type: 'success' } }));
+                            setTimeout(() => location.reload(), 500);
+                        }
+                    } catch (e) {
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'Error: ' + e.message, type: 'error' } }));
+                    }
+                }
+            }
+        }
+
+        function dashboard() {
+            return {
+                inlineConsoleOpen: false,
+                currentContainer: null,
+                async restartContainer(id, name) {
+                    if (!confirm(`Restart container "${name}"?`)) return;
+                    try {
+                        const response = await fetch(`/api/containers/${id}/restart`, { method: 'POST' });
+                        if (response.ok) {
+                            window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'Restart command sent', type: 'success' } }));
+                            setTimeout(() => location.reload(), 1000);
+                        }
+                    } catch (e) {
+                        window.dispatchEvent(new CustomEvent('notify', { detail: { message: 'Error: ' + e.message, type: 'error' } }));
+                    }
+                },
+                clearTerminal() {
+                    const el = document.getElementById('terminal-output');
+                    if (el) el.innerHTML = 'Terminal cleared...';
+                }
+            }
+        }
+
+        // Diagnostic: log HTMX target errors to console for quick trace
+        document.addEventListener('htmx:targetError', (event) => {
+            console.error('[HTMX] targetError - missing target', {
+                targetSelector: event.detail?.target,
+                responseURL: event.detail?.xhr?.responseURL,
+                sourceElement: event.target
+            });
+        });
     </script>
     {% block extra_scripts %}{% endblock %}
 </body>

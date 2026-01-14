@@ -30,9 +30,9 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, validator, EmailStr
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, func, Text, text
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, DateTime, func, Text, text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker, Session, relationship
 
 # --- Configuration ---
 logging.basicConfig(level=logging.INFO)
@@ -135,16 +135,29 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+class MonitoringGroup(Base):
+    __tablename__ = "monitoring_groups"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), index=True)
+    interval_seconds = Column(Integer, default=60)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    targets = relationship("MonitoredTarget", back_populates="group", cascade="all, delete-orphan")
+
+
 class MonitoredTarget(Base):
     __tablename__ = "monitored_targets"
     __table_args__ = {'extend_existing': True}
     id = Column(Integer, primary_key=True, index=True)
+    group_id = Column(Integer, ForeignKey("monitoring_groups.id"), nullable=True)
     name = Column(String(100), index=True)
     hostname = Column(String(255))
     interval_seconds = Column(Integer, default=60)
     is_active = Column(Boolean, default=True)
     last_status = Column(String(20), nullable=True)
     last_check = Column(DateTime(timezone=True), nullable=True)
+
+    group = relationship("MonitoringGroup", back_populates="targets")
 
 
 class Employee(Base):
@@ -204,7 +217,7 @@ class WorkstationRange(Base):
 
 
 # Note: In production, use Alembic migrations instead of create_all()
-# Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 
 
 def get_db():
@@ -284,6 +297,9 @@ def initials_filter(value):
 templates.env.filters["initials"] = initials_filter
 
 app = FastAPI(title="NetAdmin Control Plane", version="3.0.0")
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="src/static"), name="static")
 
 
 # --- Global Exception Handlers (Auth & HTMX) ---
@@ -399,15 +415,38 @@ def verify_auth_soft(request: Request) -> bool:
 
 # --- Routes ---
 
+@app.on_event("startup")
+async def startup_event():
+    """Run on startup: Create tables and ensure schema is up to date."""
+    try:
+        Base.metadata.create_all(bind=engine)
+        
+        # Emergency Schema Sync: Add group_id if it's missing (for existing installations)
+        with engine.connect() as conn:
+            try:
+                conn.execute(text("ALTER TABLE monitored_targets ADD COLUMN IF NOT EXISTS group_id INTEGER REFERENCES monitoring_groups(id)"))
+                conn.commit()
+            except Exception as schema_err:
+                logger.warning(f"Schema sync warning (group_id): {schema_err}")
+                
+        logger.info("Database tables verified/created.")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request, db: Session = Depends(get_db)):
     """Main dashboard page."""
     if not verify_auth_soft(request):
         return templates.TemplateResponse("login.html", {"request": request})
     
-    targets = db.query(MonitoredTarget).all()
+    # 1. Get Monitoring Stats (with safety fallback)
+    targets = []
+    try:
+        targets = db.query(MonitoredTarget).all()
+    except Exception as e:
+        logger.error(f"Dashboard Monitoring Query Failed: {e}")
     
-    # Get Containers
+    # 2. Get Containers
     containers = []
     try:
         for c in docker_client.containers.list(all=True):
@@ -421,7 +460,7 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"Docker error: {e}")
 
-    # Get Backups
+    # 3. Get Backups
     backups = []
     try:
         backup_dir = "/backups"
@@ -449,14 +488,83 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/monitoring", response_class=HTMLResponse)
 async def monitoring_page(request: Request, db: Session = Depends(get_db), _: bool = Depends(verify_auth)):
-    """Monitoring targets page."""
-    targets = db.query(MonitoredTarget).all()
+    """Monitoring groups & targets page."""
+    groups = []
+    ungrouped_targets = []
+    try:
+        groups = db.query(MonitoringGroup).order_by(MonitoringGroup.name).all()
+        ungrouped_targets = db.query(MonitoredTarget).filter(MonitoredTarget.group_id == None).all()
+    except Exception as e:
+        logger.error(f"Monitoring Page Query Failed: {e}")
     
     return templates.TemplateResponse("monitoring.html", {
         "request": request,
-        "targets": targets,
+        "groups": groups,
+        "ungrouped_targets": ungrouped_targets,
         "current_page": "monitoring"
     })
+
+@app.post("/api/monitoring/groups")
+async def create_monitoring_group(
+    name: str = Form(...),
+    interval: int = Form(...),
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_auth)
+):
+    """Create a new monitoring group."""
+    new_group = MonitoringGroup(name=name, interval_seconds=interval)
+    db.add(new_group)
+    db.commit()
+    return RedirectResponse(url="/monitoring", status_code=status.HTTP_303_SEE_OTHER)
+
+@app.delete("/api/monitoring/groups/{group_id}")
+async def delete_monitoring_group(group_id: int, db: Session = Depends(get_db), _: bool = Depends(verify_auth)):
+    """Delete a monitoring group and all its targets."""
+    try:
+        # Delete all targets in this group first
+        db.query(MonitoredTarget).filter(MonitoredTarget.group_id == group_id).delete()
+        # Then delete the group
+        deleted = db.query(MonitoringGroup).filter(MonitoringGroup.id == group_id).delete()
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Group not found")
+        db.commit()
+        try:
+            redis_client.publish("netadmin_events", "CONFIG_UPDATE:MONITORING")
+        except:
+            pass
+        logger.info(f"Deleted monitoring group: {group_id}")
+        # Return empty 200 response for HTMX to handle cleanly
+        return Response(status_code=200)
+    except Exception as e:
+        logger.error(f"Error deleting monitoring group {group_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/monitoring/targets")
+async def create_monitoring_target(
+    name: str = Form(...),
+    hostname: str = Form(...),
+    group_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_auth)
+):
+    """Create a new monitoring target within a group."""
+    interval = 60
+    if group_id:
+        group = db.query(MonitoringGroup).filter(MonitoringGroup.id == group_id).first()
+        if group: interval = group.interval_seconds
+
+    new_target = MonitoredTarget(name=name, hostname=hostname, group_id=group_id, interval_seconds=interval)
+    db.add(new_target)
+    db.commit()
+    try: redis_client.publish("netadmin_events", "CONFIG_UPDATE:MONITORING")
+    except: pass
+    return RedirectResponse(url="/monitoring", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Render login page (GET)."""
+    return templates.TemplateResponse("login.html", {"request": request})
 
 
 @app.get("/backups", response_class=HTMLResponse)
@@ -526,6 +634,16 @@ async def logout(request: Request):
     return response
 
 
+@app.get("/api/config/ranges")
+@app.get("/api/config/ranges", response_class=HTMLResponse)
+async def get_workstation_config(request: Request, db: Session = Depends(get_db), _: bool = Depends(verify_auth)):
+    """Return HTML partial for workstation ranges configuration."""
+    ranges = db.query(WorkstationRange).filter(WorkstationRange.is_active == True).all()
+    return templates.TemplateResponse("partials/ws_config.html", {
+        "request": request,
+        "ranges": ranges
+    })
+
 @app.get("/api/workstation-ranges")
 async def get_workstation_ranges(db: Session = Depends(get_db), _: bool = Depends(verify_auth)):
     """Get all configured workstation ranges (JSON)."""
@@ -533,8 +651,8 @@ async def get_workstation_ranges(db: Session = Depends(get_db), _: bool = Depend
     return [{
         "id": r.id,
         "prefix": r.prefix,
-        "start": r.range_start,
-        "end": r.range_end,
+        "range_start": r.range_start,
+        "range_end": r.range_end,
         "description": r.description
     } for r in ranges]
 
@@ -568,7 +686,8 @@ async def get_free_workstations(
     groups = []
     for r in ranges:
         prefix = r.prefix.upper()
-        all_ws_in_range = [f"{prefix}{i}" for i in range(r.range_start, r.range_end + 1)]
+        # FIX: Ensure 3-digit padding (WS001)
+        all_ws_in_range = [f"{prefix}{i:03d}" for i in range(r.range_start, r.range_end + 1)]
         free_ws = [ws for ws in all_ws_in_range if ws not in occupied_ws]
         
         groups.append({
@@ -680,7 +799,7 @@ async def create_target(
     return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@app.post("/api/targets/{target_id}/delete")
+@app.delete("/api/targets/{target_id}")
 async def delete_target(
     target_id: int,
     db: Session = Depends(get_db),
@@ -700,7 +819,7 @@ async def delete_target(
         logger.error(f"Redis publish error: {e}")
     
     logger.info(f"Deleted monitoring target: {target_id}")
-    return RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    return Response(status_code=status.HTTP_200_OK)
 
 
 # --- Backup Operations ---
@@ -737,6 +856,7 @@ def parse_fio(full_name: str) -> tuple[Optional[str], Optional[str], Optional[st
         return (parts[0], parts[1], " ".join(parts[2:]))
 
 
+@app.get("/inventory/rows", response_class=HTMLResponse)
 @app.get("/inventory", response_class=HTMLResponse)
 async def inventory_page(
     request: Request,
@@ -840,7 +960,7 @@ async def inventory_page(
         })
     
     # 4. HTMX Partial Response (Table Rows Only)
-    if request.headers.get("HX-Request") and request.headers.get("HX-Target") == "inventory-table-body":
+    if "/rows" in str(request.url.path) or (request.headers.get("HX-Request") and request.headers.get("HX-Target") == "inventory-table-body"):
         return templates.TemplateResponse("partials/inventory_rows.html", {
             "request": request, 
             "employees": employees
@@ -862,6 +982,26 @@ async def inventory_page(
         "current_page": "inventory"
     })
 
+
+@app.get("/api/employees/{employee_id}/form", response_class=HTMLResponse)
+async def get_employee_form(
+    employee_id: str, # 'new' or integer ID
+    request: Request,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_auth)
+):
+    """Return a server-rendered form for Add/Edit Employee."""
+    if employee_id == "new":
+        employee = None
+    else:
+        employee = db.query(Employee).filter(Employee.id == int(employee_id)).first()
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+    return templates.TemplateResponse("partials/employee_form.html", {
+        "request": request,
+        "employee": employee
+    })
 
 @app.get("/api/employees")
 async def get_employees(
@@ -1003,43 +1143,71 @@ async def create_employee(
 async def update_employee(
     employee_id: int,
     request: Request,
+    full_name: str = Form(...),
+    company: str = Form(None),
+    department: str = Form(None),
+    location: str = Form(None),
+    internal_phone: str = Form(None),
+    phone_type: str = Form(None),
+    workstation: str = Form(None),
+    device_type: str = Form(None),
+    specs_cpu: str = Form(None),
+    specs_gpu: str = Form(None),
+    specs_ram: str = Form(None),
+    monitor: str = Form(None),
+    ups: str = Form(None),
+    ad_login: str = Form(None),
+    email: str = Form(None),
+    has_ad: bool = Form(False),
+    has_drweb: bool = Form(False),
+    has_zabbix: bool = Form(False),
+    notes: str = Form(None),
     db: Session = Depends(get_db),
     _: bool = Depends(verify_auth)
 ):
-    """Update employee (inline edit) - accepts JSON body."""
+    """Update employee - accepts Form data from HTMX."""
+    logger.info(f"PATCH /api/employees/{employee_id} - Data: {full_name}, {company}, {department}")
     employee = db.query(Employee).filter(Employee.id == employee_id).first()
     if not employee:
         raise HTTPException(status_code=404, detail="Employee not found")
     
     try:
-        body = await request.json()
-        validated = EmployeeUpdate(**body)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    
-    # Update only provided fields
-    if validated.full_name is not None:
-        last_name, first_name, middle_name = parse_fio(validated.full_name)
+        # Update fields
+        last_name, first_name, middle_name = parse_fio(full_name)
         employee.last_name = last_name
         employee.first_name = first_name
         employee.middle_name = middle_name
-    if validated.department is not None:
-        employee.department = validated.department
-    if validated.internal_phone is not None:
-        employee.internal_phone = validated.internal_phone
-    if validated.workstation is not None:
-        employee.workstation = validated.workstation
-    if validated.ad_login is not None:
-        employee.ad_login = validated.ad_login
-    if validated.email is not None:
-        employee.email = validated.email
-    if validated.notes is not None:
-        employee.notes = validated.notes
-    
-    db.commit()
-    logger.info(f"Updated employee: {employee.full_name} (ID: {employee_id})")
-    
-    return {"status": "success"}
+        employee.company = company
+        employee.department = department
+        employee.location = location
+        employee.internal_phone = internal_phone
+        employee.phone_type = phone_type or 'NONE'
+        employee.workstation = workstation
+        employee.device_type = device_type
+        employee.specs_cpu = specs_cpu
+        employee.specs_gpu = specs_gpu
+        employee.specs_ram = specs_ram
+        employee.monitor = monitor
+        employee.ups = ups
+        employee.has_ad = has_ad
+        employee.has_drweb = has_drweb
+        employee.has_zabbix = has_zabbix
+        employee.ad_login = ad_login
+        employee.email = email
+        employee.notes = notes
+        
+        db.commit()
+        logger.info(f"Updated employee: {full_name} (ID: {employee_id})")
+        
+        # Return fresh list partial
+        employees = db.query(Employee).order_by(Employee.id.asc()).limit(50).all()
+        return templates.TemplateResponse("partials/inventory_rows.html", {
+            "request": request,
+            "employees": employees
+        })
+    except Exception as e:
+        logger.error(f"Error updating employee {employee_id}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/employees/{employee_id}/toggle")
@@ -1086,6 +1254,19 @@ async def delete_employee(
 
 
 # --- Health Check ---
+
+@app.get("/api/docker/logs/{container_id}")
+async def get_docker_logs(container_id: str, _: bool = Depends(verify_auth)):
+    """Fetch Docker container logs (last 50 lines)."""
+    try:
+        container = docker_client.containers.get(container_id)
+        logs = container.logs(tail=50, stdout=True, stderr=True).decode('utf-8', errors='replace')
+        return Response(content=logs, media_type="text/plain")
+    except docker.errors.NotFound:
+        raise HTTPException(status_code=404, detail="Container not found")
+    except Exception as e:
+        logger.error(f"Docker logs error: {e}")
+        return Response(content=f"Error fetching logs: {e}", media_type="text/plain")
 
 @app.get("/health")
 async def health_check():

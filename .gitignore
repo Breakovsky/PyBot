@@ -1,6 +1,8 @@
 # Environment variables
 .env
 
+_LEGACY_STORAGE
+
 # Docker storage (databases, files)
 storage/postgresql-data/
 storage/redis-data/

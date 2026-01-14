@@ -3,680 +3,190 @@
 {% block page_title %}Inventory{% endblock %}
 
 {% block content %}
-<div class="h-full flex flex-col" x-data="inventoryApp()">
+<div class="h-full flex flex-col" x-data="{ drawerOpen: false, configModalOpen: false, activeTab: 'inventory' }">
     
-    <!-- Top Bar: Filters & Actions -->
+    <!-- Top Bar: Search & Pagination -->
     <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        
-        <!-- Context-Aware Department Filters -->
-        <div class="flex items-center space-x-2 bg-white dark:bg-slate-800 p-1 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm" x-show="activeTab === 'inventory' || activeTab === 'factory'">
-             <button hx-get="/inventory" hx-target="#inventory-table-body" hx-include="[name='search']"
-                     hx-vals='{"department": ""}'
-                     :class="!filters.department ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 font-semibold' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'"
-                     @click="filters.department = ''"
-                     class="px-3 py-1.5 text-sm rounded-md transition-colors">
-                All
-            </button>
-            <button hx-get="/inventory" hx-target="#inventory-table-body" hx-include="[name='search']"
-                    hx-vals='{"department": "MOBI"}'
-                    :class="filters.department === 'MOBI' ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 font-semibold' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'"
-                    @click="filters.department = 'MOBI'"
-                    class="px-3 py-1.5 text-sm rounded-md transition-colors">
-                MOBI
-            </button>
-            <button hx-get="/inventory" hx-target="#inventory-table-body" hx-include="[name='search']"
-                    hx-vals='{"department": "EGR"}'
-                    :class="filters.department === 'EGR' ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 font-semibold' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'"
-                    @click="filters.department = 'EGR'"
-                    class="px-3 py-1.5 text-sm rounded-md transition-colors">
-                EGR
-            </button>
-             <button hx-get="/inventory" hx-target="#inventory-table-body" hx-include="[name='search']"
-                    hx-vals='{"department": "Factory"}'
-                    :class="filters.department === 'Factory' ? 'bg-indigo-50 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400 font-semibold' : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'"
-                    @click="filters.department = 'Factory'"
-                    class="px-3 py-1.5 text-sm rounded-md transition-colors">
-                Factory
-            </button>
-        </div>
-
-        <div class="flex flex-1 gap-4 sm:justify-end">
-            <div class="relative rounded-md shadow-sm">
-                <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <svg class="h-5 w-5 text-slate-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                        <path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" />
-                    </svg>
+        <div class="flex flex-1 gap-4 items-center">
+            <!-- Search -->
+            <div class="relative flex-1 max-w-md">
+                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <svg class="h-5 w-5 text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 3.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM2 9a7 7 0 1112.452 4.391l3.328 3.329a.75.75 0 11-1.06 1.06l-3.329-3.328A7 7 0 012 9z" clip-rule="evenodd" /></svg>
                 </div>
-                <input type="text" name="search" 
-                       hx-get="/inventory" 
+                <input type="text" name="search" id="inventory-search"
+                       hx-get="/inventory/rows" 
                        hx-target="#inventory-table-body" 
                        hx-trigger="keyup changed delay:500ms"
-                       class="block w-full rounded-md border-0 py-1.5 pl-10 text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700 dark:placeholder:text-slate-500 sm:text-sm sm:leading-6" 
-                       placeholder="Search employees... (⌘K)">
+                       hx-include="#inventory-limit"
+                       value="{{ search }}"
+                       class="block w-full rounded-md border-0 py-1.5 pl-10 text-slate-900 ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-600 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700 sm:text-sm" 
+                       placeholder="Search employees...">
             </div>
+
+            <!-- Pagination Limit -->
+            <div class="flex items-center gap-2">
+                <span class="text-sm text-slate-500 whitespace-nowrap">Show</span>
+                <select name="limit" id="inventory-limit"
+                        hx-get="/inventory/rows"
+                        hx-target="#inventory-table-body"
+                        hx-include="#inventory-search"
+                        class="rounded-md border-0 py-1.5 text-sm ring-1 ring-inset ring-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700 focus:ring-2 focus:ring-indigo-600">
+                    <option value="25" {{ 'selected' if limit == 25 }}>25</option>
+                    <option value="50" {{ 'selected' if limit == 50 }}>50</option>
+                    <option value="100" {{ 'selected' if limit == 100 }}>100</option>
+                    <option value="500" {{ 'selected' if limit == 500 }}>All</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="flex gap-3">
+            <button hx-get="/api/employees/new/form" 
+                    hx-target="#drawer-container"
+                    hx-swap="innerHTML"
+                    @click="drawerOpen = true"
+                    class="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500">
+                Add Employee
+            </button>
         </div>
     </div>
 
-    <!-- Tabs & Filters -->
-    <div class="border-b border-slate-200 dark:border-slate-700">
-        <div class="sm:flex sm:items-baseline sm:justify-between">
-            <nav class="-mb-px flex space-x-8" aria-label="Tabs">
-                <button @click="activeTab = 'inventory'" 
-                        :class="activeTab === 'inventory' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
-                        class="whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium">
-                    📋 All Employees
-                </button>
-                <button @click="activeTab = 'free_ws'" 
-                        :class="activeTab === 'free_ws' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
-                        class="whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium">
-                    🆓 Free Workstations
-                </button>
-                <button @click="activeTab = 'factory'" 
-                        :class="activeTab === 'factory' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-300'"
-                        class="whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium">
-                    🏭 Factory
-                </button>
-            </nav>
-
-            <div class="mt-4 sm:ml-10 sm:mt-0" x-show="activeTab === 'inventory'">
-                <div class="flex items-center space-x-2">
-                    <button hx-get="/inventory" hx-target="#inventory-table-body" hx-include="[name='search']"
-                            hx-vals='{"company": "all"}'
-                            :class="'{{ company }}' === 'all' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'"
-                            class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors">
-                        All
-                    </button>
-                    <button hx-get="/inventory" hx-target="#inventory-table-body" hx-include="[name='search']"
-                            hx-vals='{"company": "MOBI"}'
-                            :class="'{{ company }}' === 'MOBI' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'"
-                            class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors">
-                        MOBI
-                    </button>
-                    <button hx-get="/inventory" hx-target="#inventory-table-body" hx-include="[name='search']"
-                            hx-vals='{"company": "EGR"}'
-                            :class="'{{ company }}' === 'EGR' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'"
-                            class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors">
-                        EGR
-                    </button>
-                    <button hx-get="/inventory" hx-target="#inventory-table-body" hx-include="[name='search']"
-                            hx-vals='{"company": "NIK"}'
-                            :class="'{{ company }}' === 'NIK' ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600'"
-                            class="rounded-md px-3 py-1.5 text-sm font-medium transition-colors">
-                        NIK
-                    </button>
-                </div>
-            </div>
-        </div>
+    <!-- Tabs -->
+    <div class="border-b border-slate-200 dark:border-slate-700 mb-6">
+        <nav class="-mb-px flex space-x-8">
+            <button @click="activeTab = 'inventory'" 
+                    :class="activeTab === 'inventory' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-700'"
+                    class="whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors">
+                📋 All Employees
+            </button>
+            <button @click="activeTab = 'free_ws'" 
+                    :class="activeTab === 'free_ws' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-700'"
+                    class="whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors">
+                🆓 Free Workstations
+            </button>
+            <button @click="activeTab = 'factory'" 
+                    :class="activeTab === 'factory' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:text-slate-700'"
+                    class="whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium transition-colors">
+                🏭 Factory
+            </button>
+        </nav>
     </div>
 
     <!-- Inventory Table -->
-    <div x-show="activeTab === 'inventory' || activeTab === 'factory'" class="flow-root">
-        <div class="-mx-4 -my-2 overflow-x-auto sm:-mx-6 lg:-mx-8">
-            <div class="inline-block min-w-full py-2 align-middle sm:px-6 lg:px-8">
-                <div class="overflow-hidden shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
-                    <table class="min-w-full divide-y divide-slate-300 dark:divide-slate-700">
-                        <thead class="bg-slate-50 dark:bg-slate-800">
-                            <tr>
-                                <th scope="col" @click="sortBy('id')" class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-slate-900 dark:text-slate-200 sm:pl-6 cursor-pointer select-none group">
-                                    <div class="flex items-center gap-2">
-                                        #
-                                        <span class="flex flex-col">
-                                            <svg x-show="sortField === 'id' && sortDirection === 'asc'" class="h-3 w-3 text-indigo-500" fill="currentColor" viewBox="0 0 20 20"><path d="M14.707 12.707a1 1 0 01-1.414 0L10 9.414l-3.293 3.293a1 1 0 01-1.414-1.414l4-4a1 1 0 011.414 0l4 4a1 1 0 010 1.414z"/></svg>
-                                            <svg x-show="sortField === 'id' && sortDirection === 'desc'" class="h-3 w-3 text-indigo-500" fill="currentColor" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/></svg>
-                                        </span>
-                                    </div>
-                                </th>
-                                <th scope="col" @click="sortBy('full_name')" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200 cursor-pointer select-none">Name</th>
-                                <th scope="col" @click="sortBy('company')" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200 cursor-pointer select-none">Company</th>
-                                <th scope="col" @click="sortBy('department')" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200 cursor-pointer select-none">Dept</th>
-                                <th scope="col" @click="sortBy('location')" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200 cursor-pointer select-none">Location</th>
-                                <th scope="col" @click="sortBy('workstation')" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200 cursor-pointer select-none">WS</th>
-                                <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200">Phone</th>
-                                <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200">Device</th>
-                                <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200 text-center">Status</th>
-                                <th scope="col" class="relative py-3.5 pl-3 pr-4 sm:pr-6"><span class="sr-only">Actions</span></th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-200 dark:divide-slate-700 bg-white dark:bg-slate-900" id="inventory-table-body">
-                            {% include "partials/inventory_rows.html" %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+    <div x-show="activeTab === 'inventory'" 
+         style="display: block;" 
+         :style="activeTab === 'inventory' ? 'display: block' : 'display: none'"
+         class="flow-root">
+        <div class="overflow-hidden shadow ring-1 ring-black ring-opacity-5 sm:rounded-lg">
+            <table class="min-w-full divide-y divide-slate-300 dark:divide-slate-700">
+                <thead class="bg-slate-50 dark:bg-slate-800">
+                    <tr>
+                        <th scope="col" class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-slate-900 dark:text-slate-200 sm:pl-6">
+                            <div class="flex items-center gap-2 cursor-pointer" 
+                                 hx-get="/inventory/rows" hx-target="#inventory-table-body"
+                                 hx-vals='{"sort": "id", "order": "{{ "desc" if sort == "id" and order == "asc" else "asc" }}"}'>
+                                # {% if sort == 'id' %}{{ '↑' if order == 'asc' else '↓' }}{% endif %}
+                            </div>
+                        </th>
+                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200">
+                            <div class="flex items-center gap-2 cursor-pointer"
+                                 hx-get="/inventory/rows" hx-target="#inventory-table-body"
+                                 hx-vals='{"sort": "full_name", "order": "{{ "desc" if sort == "full_name" and order == "asc" else "asc" }}"}'>
+                                Name {% if sort == 'full_name' %}{{ '↑' if order == 'asc' else '↓' }}{% endif %}
+                            </div>
+                        </th>
+                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200">
+                            <!-- Unified Company Filter Toggle -->
+                            <div class="flex items-center gap-2">
+                                <span>Company</span>
+                                <div class="flex rounded-md shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 overflow-hidden ml-2">
+                                    {% for c in ['ALL', 'MOBI', 'EGR', 'NIK'] %}
+                                    <button hx-get="/inventory/rows" hx-target="#inventory-table-body"
+                                            hx-vals='{"company": "{{ c|lower }}"}'
+                                            class="px-2 py-1 text-[10px] font-bold {{ 'bg-indigo-600 text-white' if (company|upper == c) or (c == 'ALL' and company == 'all') else 'bg-white dark:bg-slate-800 text-slate-500 hover:bg-slate-50' }}">
+                                        {{ c }}
+                                    </button>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </th>
+                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200">Dept</th>
+                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200">WS</th>
+                        <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-slate-200 text-center">Status</th>
+                        <th scope="col" class="relative py-3.5 pl-3 pr-4 sm:pr-6"><span class="sr-only">Actions</span></th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-200 dark:divide-slate-700 bg-white dark:bg-slate-900" id="inventory-table-body">
+                    {% include "partials/inventory_rows.html" %}
+                </tbody>
+            </table>
         </div>
     </div>
 
-    <!-- Free WS Tab (Server-Side Lazy Load) -->
-    <div x-show="activeTab === 'free_ws'" class="space-y-6">
+    <!-- Free WS Tab -->
+    <div x-show="activeTab === 'free_ws'" 
+         style="display: none;" 
+         :style="activeTab === 'free_ws' ? 'display: block' : 'display: none'"
+         class="space-y-6">
         <div class="rounded-xl bg-white dark:bg-slate-800 shadow-sm ring-1 ring-slate-900/5 dark:ring-slate-700 p-6">
-             <div class="flex items-center justify-between mb-6">
-                <h3 class="text-base font-semibold leading-6 text-slate-900 dark:text-slate-200">Available Workstations</h3>
+                <h3 class="text-base font-semibold text-slate-900 dark:text-slate-200 flex items-center">
+                    Available Workstations
+                    <svg id="free-ws-refresh-spinner" class="htmx-indicator animate-spin ml-2 h-4 w-4 text-indigo-600" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                </h3>
                 <div class="flex gap-2">
-                    <button @click="configModalOpen = true" class="rounded-md bg-white dark:bg-slate-700 px-3 py-2 text-sm font-semibold text-slate-900 dark:text-slate-200 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-600 hover:bg-slate-50 dark:hover:bg-slate-600">⚙️ Configure</button>
-                    <button hx-get="/api/free-workstations" hx-target="#free-ws-container" hx-indicator="#free-ws-loading" class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Refresh</button>
+                    <button hx-get="/api/config/ranges" hx-target="#config-modal-container"
+                            @click="configModalOpen = true" 
+                            class="rounded-md bg-white dark:bg-slate-700 px-3 py-2 text-sm font-semibold text-slate-900 dark:text-slate-200 ring-1 ring-inset ring-slate-300 dark:ring-slate-600 hover:bg-slate-50">⚙️ Configure</button>
+                    <button hx-get="/api/free-workstations" hx-target="#free-ws-container" hx-indicator="#free-ws-refresh-spinner" class="inline-flex items-center rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500">
+                        Refresh
+                    </button>
                 </div>
-            </div>
-            
-            <!-- Loading Spinner -->
-            <div id="free-ws-loading" class="htmx-indicator text-center py-10">
-                <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-                <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Calculating free workstations...</p>
-            </div>
-
-            <!-- Content Container (Lazy Loaded) -->
             <div id="free-ws-container" 
                  hx-get="/api/free-workstations" 
                  hx-trigger="load"
-                 hx-indicator="#free-ws-loading">
-                <!-- Server will inject content here -->
+                 hx-indicator="#free-ws-refresh-spinner">
+                <!-- Data Loads Here -->
             </div>
         </div>
     </div>
 
+    <!-- Factory Tab (Placeholder) -->
+    <div x-show="activeTab === 'factory'" 
+         style="display: none;" 
+         :style="activeTab === 'factory' ? 'display: flex' : 'display: none'"
+         class="flex-1 flex-col items-center justify-center py-20 bg-white dark:bg-slate-800 rounded-xl border-2 border-dashed border-slate-300 dark:border-slate-700">
+        <span class="text-4xl mb-4">🏭</span>
+        <h3 class="text-lg font-medium text-slate-900 dark:text-slate-100">Factory Dashboard</h3>
+        <p class="text-slate-500 dark:text-slate-400">Inventory specific to production lines coming soon.</p>
+    </div>
+
     <!-- Configure Ranges Modal -->
-    <div x-show="configModalOpen" class="relative z-50" aria-labelledby="modal-title" role="dialog" aria-modal="true" style="display: none;">
-        <div x-show="configModalOpen" 
-             x-transition:enter="ease-out duration-300" 
-             x-transition:enter-start="opacity-0" 
-             x-transition:enter-end="opacity-100" 
-             x-transition:leave="ease-in duration-200" 
-             x-transition:leave-start="opacity-100" 
-             x-transition:leave-end="opacity-0" 
-             class="fixed inset-0 bg-slate-900/75 backdrop-blur-sm transition-opacity"></div>
-
-        <div class="fixed inset-0 z-10 w-screen overflow-y-auto">
-            <div class="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0">
-                <div x-show="configModalOpen" 
-                     x-transition:enter="ease-out duration-300" 
-                     x-transition:enter-start="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95" 
-                     x-transition:enter-end="opacity-100 translate-y-0 sm:scale-100" 
-                     x-transition:leave="ease-in duration-200" 
-                     x-transition:leave-start="opacity-100 translate-y-0 sm:scale-100" 
-                     x-transition:leave-end="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95" 
-                     class="relative transform overflow-hidden rounded-lg bg-white dark:bg-slate-800 text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-3xl"
-                     @click.away="configModalOpen = false">
-                    
-                    <div class="bg-white dark:bg-slate-800 px-4 pb-4 pt-5 sm:p-6 sm:pb-4">
-                        <div class="sm:flex sm:items-start">
-                            <div class="mt-3 text-center sm:ml-4 sm:mt-0 sm:text-left w-full">
-                                <h3 class="text-base font-semibold leading-6 text-slate-900 dark:text-slate-100" id="modal-title">Configure Workstation Ranges</h3>
-                                
-                                <!-- Add New Form -->
-                                <form @submit.prevent="addRange" class="mt-4 flex gap-3 items-end border-b border-slate-200 dark:border-slate-700 pb-6">
-                                    <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Prefix</label>
-                                        <input type="text" x-model="newRange.prefix" required placeholder="WS" class="mt-1 block w-24 rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-700 dark:ring-slate-600 dark:text-white sm:text-sm sm:leading-6">
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Start</label>
-                                        <input type="number" x-model="newRange.start" required class="mt-1 block w-20 rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-700 dark:ring-slate-600 dark:text-white sm:text-sm sm:leading-6">
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">End</label>
-                                        <input type="number" x-model="newRange.end" required class="mt-1 block w-20 rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-700 dark:ring-slate-600 dark:text-white sm:text-sm sm:leading-6">
-                                    </div>
-                                    <div class="flex-1">
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Description</label>
-                                        <input type="text" x-model="newRange.description" placeholder="Optional" class="mt-1 block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-700 dark:ring-slate-600 dark:text-white sm:text-sm sm:leading-6">
-                                    </div>
-                                    <button type="submit" class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">Add</button>
-                                </form>
-
-                                <!-- Existing Ranges List -->
-                                <div class="mt-4 flow-root">
-                                    <ul role="list" class="divide-y divide-slate-100 dark:divide-slate-700">
-                                        <template x-for="range in ranges" :key="range.id">
-                                            <li class="flex items-center justify-between gap-x-6 py-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 px-2 rounded-md transition-colors">
-                                                <div class="min-w-0">
-                                                    <div class="flex items-start gap-x-3">
-                                                        <p class="text-sm font-semibold leading-6 text-slate-900 dark:text-slate-100" x-text="range.prefix"></p>
-                                                        <p class="rounded-md whitespace-nowrap mt-0.5 px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset text-slate-600 bg-slate-50 ring-slate-500/10 dark:text-slate-400 dark:bg-slate-800 dark:ring-slate-400/20" x-text="range.start + ' - ' + range.end"></p>
-                                                    </div>
-                                                    <div class="mt-1 flex items-center gap-x-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
-                                                        <p class="truncate" x-text="range.description || 'No description'"></p>
-                                                    </div>
-                                                </div>
-                                                <div class="flex flex-none items-center gap-x-4">
-                                                    <button @click="deleteRange(range.id)" class="text-red-600 hover:text-red-900 dark:text-red-400 dark:hover:text-red-300 text-sm font-medium">Delete</button>
-                                                </div>
-                                            </li>
-                                        </template>
-                                        <li x-show="ranges.length === 0" class="py-4 text-center text-sm text-slate-500">No ranges configured</li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="bg-slate-50 dark:bg-slate-700/50 px-4 py-3 sm:flex sm:flex-row-reverse sm:px-6">
-                        <button type="button" 
-                                @click="configModalOpen = false; fetchRanges(); htmx.ajax('GET', '/api/free-workstations', { target: '#free-ws-container' });" 
-                                class="inline-flex w-full justify-center rounded-md bg-white dark:bg-slate-800 px-3 py-2 text-sm font-semibold text-slate-900 dark:text-slate-200 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 sm:mt-0 sm:w-auto">
-                            Done
-                        </button>
-                    </div>
+    <div x-show="configModalOpen" class="relative z-50" style="display: none;" :style="configModalOpen ? 'display: block' : 'display: none'">
+        <!-- Backdrop: ONLY handler here -->
+        <div class="fixed inset-0 bg-slate-900/75 backdrop-blur-sm" @click="configModalOpen = false"></div>
+        <div class="fixed inset-0 z-10 w-screen overflow-y-auto pointer-events-none">
+            <div class="flex min-h-full items-end justify-center p-4 text-center sm:items-center sm:p-0 pointer-events-none">
+                <div id="config-modal-container" class="w-full max-w-3xl pointer-events-auto">
+                    <!-- Partial /api/config/ranges loaded here -->
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Drawer -->
-    <div x-show="drawerOpen" class="relative z-50" aria-labelledby="slide-over-title" role="dialog" aria-modal="true" style="display: none;">
-        <div x-show="drawerOpen" 
-             x-transition:enter="ease-in-out duration-500" 
-             x-transition:enter-start="opacity-0" 
-             x-transition:enter-end="opacity-100" 
-             x-transition:leave="ease-in-out duration-500" 
-             x-transition:leave-start="opacity-100" 
-             x-transition:leave-end="opacity-0" 
-             class="fixed inset-0 bg-slate-900/75 backdrop-blur-sm transition-opacity"></div>
-
-        <div class="fixed inset-0 overflow-hidden">
+    <!-- Right Drawer (for Add/Edit) -->
+    <div x-show="drawerOpen" class="relative z-50" style="display: none;" :style="drawerOpen ? 'display: block' : 'display: none'" x-cloak>
+        <!-- Backdrop: ONLY handler here -->
+        <div class="fixed inset-0 bg-slate-900/75 backdrop-blur-sm" @click="drawerOpen = false"></div>
+        <div class="fixed inset-0 overflow-hidden pointer-events-none">
             <div class="absolute inset-0 overflow-hidden">
                 <div class="pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-10">
-                    <div x-show="drawerOpen" 
-                         x-transition:enter="transform transition ease-in-out duration-500 sm:duration-700" 
-                         x-transition:enter-start="translate-x-full" 
-                         x-transition:enter-end="translate-x-0" 
-                         x-transition:leave="transform transition ease-in-out duration-500 sm:duration-700" 
-                         x-transition:leave-start="translate-x-0" 
-                         x-transition:leave-end="translate-x-full" 
-                         class="pointer-events-auto w-screen max-w-md" 
-                         @click.away="drawerOpen = false">
-                        
-                        <div class="flex h-full flex-col overflow-y-scroll bg-white dark:bg-slate-900 shadow-xl">
-                            <div class="px-4 py-6 sm:px-6 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700">
-                                <div class="flex items-start justify-between">
-                                    <h2 class="text-base font-semibold leading-6 text-slate-900 dark:text-slate-100" id="slide-over-title">
-                                        <span x-text="editMode ? 'Edit Employee' : 'Employee Details'"></span>
-                                    </h2>
-                                    <div class="ml-3 flex h-7 items-center gap-3">
-                                        <button @click="editMode = !editMode" type="button" class="rounded-md bg-indigo-600 px-2.5 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600">
-                                            <span x-text="editMode ? 'Save' : 'Edit'"></span>
-                                        </button>
-                                        <button @click="drawerOpen = false" type="button" class="relative rounded-md text-slate-400 hover:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2">
-                                            <span class="absolute -inset-2.5"></span>
-                                            <span class="sr-only">Close panel</span>
-                                            <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
-                                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                                            </svg>
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="mt-4">
-                                     <div class="flex items-center">
-                                        <div class="h-12 w-12 flex-shrink-0 rounded-full bg-indigo-600 flex items-center justify-center">
-                                            <span class="text-lg font-bold text-white" x-text="selectedEmployee ? getInitials(selectedEmployee.full_name) : ''"></span>
-                                        </div>
-                                        <div class="ml-4">
-                                            <h3 class="text-lg font-medium text-slate-900 dark:text-slate-100" x-text="selectedEmployee?.full_name"></h3>
-                                            <p class="text-sm text-slate-500 dark:text-slate-400" x-text="selectedEmployee?.department || 'No Department'"></p>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Drawer Tabs -->
-                            <div class="border-b border-slate-200 dark:border-slate-700">
-                                <nav class="-mb-px flex space-x-6 px-6" aria-label="Tabs">
-                                    <button @click="drawerActiveTab = 'general'" :class="drawerActiveTab === 'general' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:text-slate-400'" class="whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium">General</button>
-                                    <button @click="drawerActiveTab = 'hardware'" :class="drawerActiveTab === 'hardware' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:text-slate-400'" class="whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium">Hardware</button>
-                                    <button @click="drawerActiveTab = 'software'" :class="drawerActiveTab === 'software' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:text-slate-400'" class="whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium">Software</button>
-                                    <button @click="drawerActiveTab = 'notes'" :class="drawerActiveTab === 'notes' ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-700 dark:text-slate-400'" class="whitespace-nowrap border-b-2 py-4 px-1 text-sm font-medium">Notes</button>
-                                </nav>
-                            </div>
-
-                            <div class="relative flex-1 px-4 py-6 sm:px-6 space-y-6">
-                                
-                                <!-- General Tab -->
-                                <div x-show="drawerActiveTab === 'general'" class="space-y-4">
-                                    <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Full Name</label>
-                                        <div class="mt-2">
-                                            <input type="text" x-model="selectedEmployee.full_name" :disabled="!editMode" class="block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:ring-slate-700 dark:text-white sm:text-sm sm:leading-6 disabled:opacity-50 disabled:bg-slate-100 dark:disabled:bg-slate-800">
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Company</label>
-                                        <div class="mt-2">
-                                            <input type="text" x-model="selectedEmployee.company" :disabled="!editMode" class="block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:ring-slate-700 dark:text-white sm:text-sm sm:leading-6 disabled:opacity-50">
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Department</label>
-                                        <div class="mt-2">
-                                            <input type="text" x-model="selectedEmployee.department" :disabled="!editMode" class="block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:ring-slate-700 dark:text-white sm:text-sm sm:leading-6 disabled:opacity-50">
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Location</label>
-                                        <div class="mt-2">
-                                            <input type="text" x-model="selectedEmployee.location" :disabled="!editMode" class="block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:ring-slate-700 dark:text-white sm:text-sm sm:leading-6 disabled:opacity-50">
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Workstation</label>
-                                        <div class="mt-2">
-                                            <input type="text" x-model="selectedEmployee.workstation" :disabled="!editMode" class="block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:ring-slate-700 dark:text-white sm:text-sm sm:leading-6 disabled:opacity-50">
-                                        </div>
-                                    </div>
-                                     <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">AD Login</label>
-                                        <div class="mt-2">
-                                            <input type="text" x-model="selectedEmployee.ad_login" :disabled="!editMode" class="block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:ring-slate-700 dark:text-white sm:text-sm sm:leading-6 disabled:opacity-50">
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Hardware Tab -->
-                                <div x-show="drawerActiveTab === 'hardware'" class="space-y-4">
-                                     <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Device Type</label>
-                                        <div class="mt-2">
-                                            <input type="text" x-model="selectedEmployee.device_type" :disabled="!editMode" class="block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:ring-slate-700 dark:text-white sm:text-sm sm:leading-6 disabled:opacity-50">
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">CPU</label>
-                                        <div class="mt-2">
-                                            <input type="text" x-model="selectedEmployee.specs_cpu" :disabled="!editMode" class="block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:ring-slate-700 dark:text-white sm:text-sm sm:leading-6 disabled:opacity-50">
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">RAM</label>
-                                        <div class="mt-2">
-                                            <input type="text" x-model="selectedEmployee.specs_ram" :disabled="!editMode" class="block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:ring-slate-700 dark:text-white sm:text-sm sm:leading-6 disabled:opacity-50">
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">GPU</label>
-                                        <div class="mt-2">
-                                            <input type="text" x-model="selectedEmployee.specs_gpu" :disabled="!editMode" class="block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:ring-slate-700 dark:text-white sm:text-sm sm:leading-6 disabled:opacity-50">
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Software Tab -->
-                                <div x-show="drawerActiveTab === 'software'" class="space-y-4">
-                                    <div class="flex items-center justify-between py-3">
-                                        <div class="flex flex-col">
-                                            <span class="text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Active Directory</span>
-                                            <span class="text-sm text-slate-500">Domain access enabled</span>
-                                        </div>
-                                        <button type="button" 
-                                                @click="if(editMode) selectedEmployee.has_ad = !selectedEmployee.has_ad"
-                                                :class="selectedEmployee.has_ad ? 'bg-indigo-600' : 'bg-slate-200 dark:bg-slate-700'" 
-                                                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2" 
-                                                role="switch" 
-                                                :aria-checked="selectedEmployee.has_ad">
-                                            <span aria-hidden="true" 
-                                                  :class="selectedEmployee.has_ad ? 'translate-x-5' : 'translate-x-0'" 
-                                                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-                                        </button>
-                                    </div>
-                                     <div class="flex items-center justify-between py-3">
-                                        <div class="flex flex-col">
-                                            <span class="text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Dr.Web</span>
-                                            <span class="text-sm text-slate-500">Antivirus protection</span>
-                                        </div>
-                                        <button type="button" 
-                                                @click="if(editMode) selectedEmployee.has_drweb = !selectedEmployee.has_drweb"
-                                                :class="selectedEmployee.has_drweb ? 'bg-indigo-600' : 'bg-slate-200 dark:bg-slate-700'" 
-                                                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2" 
-                                                role="switch" 
-                                                :aria-checked="selectedEmployee.has_drweb">
-                                            <span aria-hidden="true" 
-                                                  :class="selectedEmployee.has_drweb ? 'translate-x-5' : 'translate-x-0'" 
-                                                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-                                        </button>
-                                    </div>
-                                    <div class="flex items-center justify-between py-3">
-                                        <div class="flex flex-col">
-                                            <span class="text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Zabbix</span>
-                                            <span class="text-sm text-slate-500">System monitoring</span>
-                                        </div>
-                                        <button type="button" 
-                                                @click="if(editMode) selectedEmployee.has_zabbix = !selectedEmployee.has_zabbix"
-                                                :class="selectedEmployee.has_zabbix ? 'bg-indigo-600' : 'bg-slate-200 dark:bg-slate-700'" 
-                                                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-600 focus:ring-offset-2" 
-                                                role="switch" 
-                                                :aria-checked="selectedEmployee.has_zabbix">
-                                            <span aria-hidden="true" 
-                                                  :class="selectedEmployee.has_zabbix ? 'translate-x-5' : 'translate-x-0'" 
-                                                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-                                        </button>
-                                    </div>
-                                </div>
-                                
-                                <!-- Notes Tab -->
-                                <div x-show="drawerActiveTab === 'notes'" class="space-y-4">
-                                     <div>
-                                        <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-200">Notes</label>
-                                        <div class="mt-2">
-                                            <textarea rows="10" x-model="selectedEmployee.notes" :disabled="!editMode" class="block w-full rounded-md border-0 py-1.5 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 placeholder:text-slate-400 focus:ring-2 focus:ring-inset focus:ring-indigo-600 dark:bg-slate-800 dark:ring-slate-700 dark:text-white sm:text-sm sm:leading-6 disabled:opacity-50"></textarea>
-                                        </div>
-                                    </div>
-                                </div>
-
-                            </div>
-                        </div>
+                    <!-- Drawer Panel (NO x-show, controlled by parent only) -->
+                    <div class="pointer-events-auto w-screen max-w-md"
+                         id="drawer-container">
+                        <!-- Server-rendered form injected here -->
                     </div>
                 </div>
             </div>
         </div>
     </div>
 </div>
-{% endblock %}
-
-{% block extra_scripts %}
-    <script>
-        function inventoryApp() {
-            return {
-                // UI State
-                activeTab: 'inventory',
-                filters: { department: '' },
-                
-                // Drawer State
-                drawerOpen: false,
-                editMode: false,
-                selectedEmployee: null,
-                drawerActiveTab: 'general',
-                
-                // Workstation Config (Server-Side now)
-                ranges: [],
-                configModalOpen: false,
-                newRange: { prefix: '', start: 1, end: 100, description: '' },
-                
-                init() {
-                    console.log('[Inventory V3.1] Initializing HTMX + Server-Side mode');
-                    
-                    // Listen for global notifications
-                    window.addEventListener('notify', (e) => {
-                        this.showToast(e.detail.message, e.detail.type);
-                    });
-                },
-                
-                // --- Filters (UI Only) ---
-                setFilter(key, value) {
-                    if (key === 'department') {
-                        this.filters.department = value;
-                    }
-                    // HTMX handles the fetch via hx-get on buttons
-                },
-
-                sortBy(field) {
-                    // Legacy function - HTMX now handles sorting via column headers
-                    // Kept for backward compatibility with any remaining click handlers
-                },
-
-                // --- Workstation Ranges Config ---
-                async fetchRanges() {
-                    try {
-                        const res = await fetch('/api/workstation-ranges');
-                        if (res.ok) {
-                            this.ranges = await res.json();
-                        }
-                    } catch (e) {
-                        console.error('Failed to fetch ranges', e);
-                    }
-                },
-                
-                async addRange() {
-                    try {
-                        const formData = new FormData();
-                        formData.append('prefix', this.newRange.prefix);
-                        formData.append('start', this.newRange.start);
-                        formData.append('end', this.newRange.end);
-                        if (this.newRange.description) formData.append('description', this.newRange.description);
-                        
-                        const res = await fetch('/api/workstation-ranges', { method: 'POST', body: formData });
-                        if (res.ok) {
-                            this.newRange = { prefix: '', start: 1, end: 100, description: '' };
-                            this.fetchRanges();
-                            this.showToast('Range added', 'success');
-                            // Trigger server-side refresh via HTMX
-                            if (this.activeTab === 'free_ws') {
-                                htmx.ajax('GET', '/api/free-workstations', { target: '#free-ws-container' });
-                            }
-                        }
-                    } catch (e) {
-                        this.showToast('Error adding range', 'error');
-                    }
-                },
-                
-                async deleteRange(id) {
-                    if (!confirm('Are you sure?')) return;
-                    try {
-                        const res = await fetch(`/api/workstation-ranges/${id}`, { method: 'DELETE' });
-                        if (res.ok) {
-                            this.fetchRanges();
-                            this.showToast('Range deleted', 'success');
-                            // Trigger server-side refresh via HTMX
-                            if (this.activeTab === 'free_ws') {
-                                htmx.ajax('GET', '/api/free-workstations', { target: '#free-ws-container' });
-                            }
-                        }
-                    } catch (e) {
-                        this.showToast('Error deleting range', 'error');
-                    }
-                },
-
-                // --- Drawer & Helpers ---
-                openDrawer(employee) {
-                    if (employee) {
-                        this.selectedEmployee = JSON.parse(JSON.stringify(employee));
-                        this.editMode = false;
-                    } else {
-                        this.selectedEmployee = this.getEmptyEmployee();
-                        this.editMode = true;
-                    }
-                    this.drawerActiveTab = 'general';
-                    this.drawerOpen = true;
-                },
-                
-                getEmptyEmployee() {
-                    return {
-                        id: null,
-                        full_name: '',
-                        company: 'MOBI',
-                        department: '',
-                        location: '',
-                        internal_phone: '',
-                        phone_type: 'NONE',
-                        workstation: '',
-                        device_type: 'PC',
-                        specs_cpu: '',
-                        specs_gpu: '',
-                        specs_ram: '',
-                        monitor: '',
-                        ups: '',
-                        has_ad: false,
-                        has_drweb: false,
-                        has_zabbix: false,
-                        ad_login: '',
-                        email: '',
-                        notes: '',
-                        is_active: true
-                    };
-                },
-                
-                getInitials(name) {
-                    if (!name) return '?';
-                    const parts = name.split(' ');
-                    if (parts.length >= 2) {
-                        return (parts[0][0] + parts[1][0]).toUpperCase();
-                    }
-                    return name.substring(0, 2).toUpperCase();
-                },
-                
-                getDeviceIcon(type) {
-                    const icons = { 'Laptop': '💻', 'PC': '🖥️', 'Monoblock': '🖥', 'Server': '🗄️', 'Other': '📦' };
-                    return icons[type] || '📦';
-                },
-
-                async saveEmployee() {
-                    const url = this.selectedEmployee.id ? `/api/employees/${this.selectedEmployee.id}` : '/api/employees';
-                    // We should use PATCH for updates if it's existing
-                    const method = this.selectedEmployee.id ? 'PATCH' : 'POST';
-                    
-                    const headers = {};
-                    let body;
-
-                    // If PATCH, send JSON
-                    if (method === 'PATCH') {
-                        headers['Content-Type'] = 'application/json';
-                        body = JSON.stringify(this.selectedEmployee);
-                    } else {
-                        // Keep FormData for Create as currently implemented in main.py
-                        const formData = new FormData();
-                        for (const key in this.selectedEmployee) {
-                            if (this.selectedEmployee[key] !== null) {
-                                formData.append(key, this.selectedEmployee[key]);
-                            }
-                        }
-                        body = formData;
-                    }
-                    
-                    try {
-                        const res = await fetch(url, { method, headers, body });
-                        if (res.ok) {
-                            this.showToast('Employee saved', 'success');
-                            this.drawerOpen = false;
-                            // Reload table via HTMX
-                            htmx.ajax('GET', '/inventory', {target:'#inventory-table-body', source: '#inventory-table-body'});
-                        } else {
-                            const err = await res.json();
-                            this.showToast(err.detail || 'Error saving', 'error');
-                        }
-                    } catch (e) {
-                        console.error(e);
-                        this.showToast('Network error', 'error');
-                    }
-                },
-                
-                async deleteEmployee() {
-                    if (!confirm('Delete this employee?')) return;
-                    try {
-                        const res = await fetch(`/api/employees/${this.selectedEmployee.id}`, { method: 'DELETE' });
-                        if (res.ok) {
-                            this.showToast('Employee deleted', 'success');
-                            this.drawerOpen = false;
-                            htmx.ajax('GET', '/inventory', {target:'#inventory-table-body', source: '#inventory-table-body'});
-                        }
-                    } catch (e) {
-                        this.showToast('Error deleting', 'error');
-                    }
-                },
-
-                copyToClipboard(text) {
-                    navigator.clipboard.writeText(text).then(() => {
-                        this.showToast('Copied: ' + text, 'success');
-                    });
-                },
-
-                showToast(message, type) {
-                    window.dispatchEvent(new CustomEvent('notify', { detail: { message, type } }));
-                }
-            }
-        }
-    </script>
 {% endblock %}

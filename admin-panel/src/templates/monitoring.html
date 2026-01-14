@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block page_title %}Monitoring{% endblock %}
+
+{% block content %}
+<div class="space-y-8" x-data="{ addGroupModal: false, addTargetModal: false, activeGroupId: null }">
+    
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Infrastructure Monitoring</h2>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Manage grouped checks and individual targets.</p>
+        </div>
+        <button @click="addGroupModal = true" class="inline-flex items-center rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500">
+            <svg class="-ml-0.5 mr-1.5 h-5 w-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Add Group
+        </button>
+    </div>
+
+    <!-- Groups Grid -->
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {% for group in groups %}
+        <div class="monitoring-group-card bg-white/80 dark:bg-slate-800/80 backdrop-blur-md rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden flex flex-col" id="group-{{ group.id }}" data-group-id="{{ group.id }}">
+            <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-900/50 flex items-center justify-between">
+                <div>
+                    <h3 class="text-base font-bold text-slate-900 dark:text-white">{{ group.name }}</h3>
+                    <span class="text-[10px] uppercase font-bold text-slate-400">Check Interval: {{ group.interval_seconds }}s</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button @click="activeGroupId = {{ group.id }}; addTargetModal = true" class="text-xs font-bold text-indigo-600 hover:text-indigo-500 uppercase">Add Target</button>
+                    <button onclick="triggerDeleteConfirm('/api/monitoring/groups/{{ group.id }}', '#group-{{ group.id }}', 'Delete group \'{{ group.name }}\' and all its targets?')" 
+                            class="text-slate-400 hover:text-red-500 transition-colors">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex-1 p-0">
+                <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                        {% for target in group.targets %}
+                        <tr id="target-{{ target.id }}" class="hover:bg-slate-50/50 dark:hover:bg-slate-900/50 transition-colors">
+                            <td class="px-6 py-3 whitespace-nowrap text-sm">
+                                <div class="flex items-center">
+                                    <div class="h-2 w-2 rounded-full mr-3 {{ 'bg-green-500' if target.last_status == 'UP' else 'bg-red-500' if target.last_status == 'DOWN' else 'bg-slate-300' }}"></div>
+                                    <span class="font-medium text-slate-700 dark:text-slate-300">{{ target.name }}</span>
+                                </div>
+                            </td>
+                            <td class="px-6 py-3 whitespace-nowrap text-xs font-mono text-slate-500">{{ target.hostname }}</td>
+                            <td class="px-6 py-3 whitespace-nowrap text-right">
+                                <button onclick="triggerDeleteConfirm('/api/targets/{{ target.id }}', '#target-{{ target.id }}', 'Remove target \'{{ target.name }}\'?')"
+                                        class="text-slate-300 hover:text-red-500 transition-colors">
+                                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="3" class="px-6 py-10 text-center text-xs text-slate-400 italic">No targets in this group</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Ungrouped Targets -->
+    {% if ungrouped_targets %}
+    <div class="mt-12">
+        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Ungrouped Targets</h3>
+        <div class="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+            <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+                <thead class="bg-slate-50 dark:bg-slate-900/50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Name</th>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Hostname</th>
+                        <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                    {% for target in ungrouped_targets %}
+                    <tr id="target-{{ target.id }}">
+                        <td class="px-6 py-4 text-sm text-slate-700 dark:text-slate-300 font-medium">{{ target.name }}</td>
+                        <td class="px-6 py-4 text-sm text-slate-500 font-mono">{{ target.hostname }}</td>
+                        <td class="px-6 py-4 text-right">
+                            <button onclick="triggerDeleteConfirm('/api/targets/{{ target.id }}', '#target-{{ target.id }}', 'Delete target \'{{ target.name }}\' permanently?')" 
+                                    class="text-red-500 text-xs font-bold uppercase hover:text-red-700 transition-colors">Delete</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Add Group Modal -->
+    <div x-show="addGroupModal" class="relative z-50" style="display: none;" :style="addGroupModal ? 'display: block' : 'display: none'" x-cloak>
+        <!-- Backdrop: ONLY handler here -->
+        <div class="fixed inset-0 bg-slate-900/75 backdrop-blur-sm" @click="addGroupModal = false"></div>
+        <div class="fixed inset-0 z-10 overflow-y-auto pointer-events-none">
+            <div class="flex min-h-full items-center justify-center p-4 pointer-events-none">
+                <div class="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700 pointer-events-auto">
+                    <form action="/api/monitoring/groups" method="POST"
+                          hx-on::after-request="addGroupModal = false">
+                        <div class="p-6 border-b border-slate-100 dark:border-slate-700">
+                            <h3 class="text-lg font-bold text-slate-900 dark:text-white">Create New Group</h3>
+                        </div>
+                        <div class="p-6 space-y-4">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase">Group Name</label>
+                                <input type="text" name="name" required 
+                                       class="mt-1 block w-full rounded-lg border-slate-300 bg-white px-3 py-2 text-sm placeholder-slate-400 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase">Check Interval (seconds)</label>
+                                <input type="number" name="interval" value="60" min="5" required 
+                                       class="mt-1 block w-full rounded-lg border-slate-300 bg-white px-3 py-2 text-sm placeholder-slate-400 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white">
+                            </div>
+                        </div>
+                        <div class="p-6 bg-slate-50 dark:bg-slate-900/50 flex justify-end gap-3">
+                            <button type="button" @click="addGroupModal = false" class="px-4 py-2 text-sm font-bold text-slate-500 hover:text-slate-700 uppercase">Cancel</button>
+                            <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-md hover:bg-indigo-500 uppercase">Create Group</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Target Modal -->
+    <div x-show="addTargetModal" class="relative z-50" style="display: none;" :style="addTargetModal ? 'display: block' : 'display: none'" x-cloak>
+        <!-- Backdrop: ONLY handler here -->
+        <div class="fixed inset-0 bg-slate-900/75 backdrop-blur-sm" @click="addTargetModal = false"></div>
+        <div class="fixed inset-0 z-10 overflow-y-auto pointer-events-none">
+            <div class="flex min-h-full items-center justify-center p-4 pointer-events-none">
+                <div class="bg-white dark:bg-slate-800 rounded-xl shadow-xl w-full max-w-md overflow-hidden border border-slate-200 dark:border-slate-700 pointer-events-auto">
+                    <form action="/api/monitoring/targets" method="POST"
+                          hx-on::after-request="addTargetModal = false">
+                        <input type="hidden" name="group_id" :value="activeGroupId">
+                        <div class="p-6 border-b border-slate-100 dark:border-slate-700">
+                            <h3 class="text-lg font-bold text-slate-900 dark:text-white">Add Target to Group</h3>
+                        </div>
+                        <div class="p-6 space-y-4">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase">Target Name</label>
+                                <input type="text" name="name" required placeholder="Main Web Server" 
+                                       class="mt-1 block w-full rounded-lg border-slate-300 bg-white px-3 py-2 text-sm placeholder-slate-400 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase">Hostname / IP</label>
+                                <input type="text" name="hostname" required placeholder="192.168.1.10" 
+                                       class="mt-1 block w-full rounded-lg border-slate-300 bg-white px-3 py-2 text-sm placeholder-slate-400 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 dark:border-slate-700 dark:bg-slate-900 dark:text-white">
+                            </div>
+                        </div>
+                        <div class="p-6 bg-slate-50 dark:bg-slate-900/50 flex justify-end gap-3">
+                            <button type="button" @click="addTargetModal = false" class="px-4 py-2 text-sm font-bold text-slate-500 hover:text-slate-700 uppercase">Cancel</button>
+                            <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-bold rounded-md hover:bg-indigo-500 uppercase">Add Target</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+    <!-- Simplified logic, removed transition animations causing crashes -->
+{% endblock %}

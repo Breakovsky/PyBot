@@ -13,30 +13,52 @@ CREATE TABLE IF NOT EXISTS employees (
             COALESCE(first_name || ' ', '') ||
             COALESCE(middle_name, '')
         )
-    ) STORED,  -- Computed column for backward compatibility (can be empty if all parts are NULL)
+    ) STORED,
+    
+    -- Organization
+    company VARCHAR(100),
     department VARCHAR(255),
-    phone VARCHAR(50),
-    workstation VARCHAR(100),  -- WS number
-    ad_login VARCHAR(100),     -- Active Directory login
+    location VARCHAR(255),
+    
+    -- Contact
     email VARCHAR(255),
+    phone_type VARCHAR(20),
+    internal_phone VARCHAR(50),
+    
+    -- Hardware
+    workstation VARCHAR(100),
+    device_type VARCHAR(50),
+    specs_cpu VARCHAR(255),
+    specs_gpu VARCHAR(255),
+    specs_ram VARCHAR(50),
+    monitor VARCHAR(255),
+    ups VARCHAR(255),
+    
+    -- Software / Access
+    ad_login VARCHAR(100),
+    has_ad BOOLEAN DEFAULT FALSE,
+    has_drweb BOOLEAN DEFAULT FALSE,
+    has_zabbix BOOLEAN DEFAULT FALSE,
+    
     notes TEXT,
     is_active BOOLEAN DEFAULT TRUE,
+    
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-    -- Note: No name constraint - allow empty records to maintain exact count (621 records)
 );
 
--- Index for fast search
+-- Indexes for fast search
 CREATE INDEX IF NOT EXISTS idx_employees_last_name ON employees(last_name);
 CREATE INDEX IF NOT EXISTS idx_employees_first_name ON employees(first_name);
-CREATE INDEX IF NOT EXISTS idx_employees_middle_name ON employees(middle_name);
-CREATE INDEX IF NOT EXISTS idx_employees_full_name ON employees(full_name);
-CREATE INDEX IF NOT EXISTS idx_employees_phone ON employees(phone);
+CREATE INDEX IF NOT EXISTS idx_employees_company ON employees(company);
+CREATE INDEX IF NOT EXISTS idx_employees_department ON employees(department);
+CREATE INDEX IF NOT EXISTS idx_employees_location ON employees(location);
 CREATE INDEX IF NOT EXISTS idx_employees_workstation ON employees(workstation);
-CREATE INDEX IF NOT EXISTS idx_employees_ad_login ON employees(ad_login);
+CREATE INDEX IF NOT EXISTS idx_employees_internal_phone ON employees(internal_phone);
 CREATE INDEX IF NOT EXISTS idx_employees_email ON employees(email);
+CREATE INDEX IF NOT EXISTS idx_employees_ad_login ON employees(ad_login);
 
--- Monitored Targets (already exists from admin-panel, ensuring compatibility)
+-- Monitored Targets
 CREATE TABLE IF NOT EXISTS monitored_targets (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
@@ -72,4 +94,3 @@ CREATE TABLE IF NOT EXISTS inventory_audit (
 
 CREATE INDEX IF NOT EXISTS idx_audit_table_record ON inventory_audit(table_name, record_id);
 CREATE INDEX IF NOT EXISTS idx_audit_changed_at ON inventory_audit(changed_at DESC);
-

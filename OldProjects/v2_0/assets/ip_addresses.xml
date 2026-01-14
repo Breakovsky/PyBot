@@ -1,9 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<ip_groups>
-    <group name="Видеосервера">
-        <device>
-            <name>Trassir96</name>
-            <ip>192.168.12.96</ip>
-        </device>
-    </group>
-</ip_groups>
