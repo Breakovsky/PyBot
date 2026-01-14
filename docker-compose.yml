@@ -63,6 +63,7 @@ services:
       - ./storage/redmine/files:/usr/src/redmine/files
       - ./storage/redmine/plugins:/usr/src/redmine/plugins
       - ./storage/redmine/themes:/usr/src/redmine/themes
+      - ./storage/shared:/usr/src/redmine/shared  # Shared storage for file exchange
       - ./config/configuration.yml:/usr/src/redmine/config/configuration.yml
       - ./config/database.yml:/usr/src/redmine/config/database.yml
       - ./logs/redmine:/usr/src/redmine/log
